@@ -1,5 +1,7 @@
 # Model Maze Race
 
+<img width="1997" height="1251" alt="image" src="https://github.com/user-attachments/assets/dbba0f40-6b02-4962-a49d-36b894e71cee" />
+
 > A competitive AI model evaluation game where multiple AI models race to escape procedurally generated mazes using limited visibility.
 
 **Built for the [AI Gateway Hackathon](https://ai-gateway-game-hackathon.vercel.app/)** - A simulation game where AI models compete head-to-head in autonomous maze navigation challenges.
