@@ -34,7 +34,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useApiKey } from "@/context/api-key-context";
 import { getAllKeyStats } from "@/lib/api-key-stats";
-import { isOidcConfigured } from "@/lib/oidc";
 import type { ApiKeyConfig } from "@/types";
 import {
   AlertCircle,
@@ -56,6 +55,11 @@ interface ApiKeyModalProps {
   onSubmit: (config: ApiKeyConfig) => void;
   required?: boolean;
   onClose?: () => void;
+}
+
+function isOidcConfigured(): boolean {
+  return !!process.env.NEXT_PUBLIC_VERCEL_APP_CLIENT_ID;
+  // we dont check for the secret because it is stored in a httpOnly cookie server side
 }
 
 /**

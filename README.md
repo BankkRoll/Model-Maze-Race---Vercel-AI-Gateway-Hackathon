@@ -110,7 +110,7 @@ Setup → Generate Maze → Initialize Models → Start Race
    npm install
    ```
 
-2. **Set up authentication** (choose one method)
+2. **Set up authentication**
 
    **Option 1: Vercel Auth (OIDC)** - Recommended
    ```bash
