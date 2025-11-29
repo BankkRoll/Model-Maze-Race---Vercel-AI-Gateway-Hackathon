@@ -4,10 +4,19 @@
  * Heads-up display showing race statistics and model status with integrated live AI chat
  */
 
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AIChatMessage, AIStatus, ModelState } from "@/types";
-import { Brain, Loader2 } from "lucide-react";
+import {
+  Brain,
+  Loader2,
+  Pause,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Square,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef } from "react";
 
@@ -17,6 +26,16 @@ interface RaceHUDProps {
   maxTurns: number;
   chatMessages: AIChatMessage[];
   modelStatuses: Record<string, AIStatus>;
+  isRunning: boolean;
+  isPaused: boolean;
+  onStartRace: () => void;
+  onPauseRace: () => void;
+  onResumeRace: () => void;
+  onStopRace: () => void;
+  onReset: () => void;
+  onRegenerateMaze: () => void;
+  /** Hide reset and regenerate buttons (for landing page demo) */
+  hideControlButtons?: boolean;
 }
 
 export function RaceHUD({
@@ -25,6 +44,15 @@ export function RaceHUD({
   maxTurns,
   chatMessages,
   modelStatuses,
+  isRunning,
+  isPaused,
+  onStartRace,
+  onPauseRace,
+  onResumeRace,
+  onStopRace,
+  onReset,
+  onRegenerateMaze,
+  hideControlButtons = false,
 }: RaceHUDProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -36,7 +64,7 @@ export function RaceHUD({
 
   return (
     <Card className="gap-0 p-2 sm:p-2.5 bg-card/50 backdrop-blur-sm border-border/50 h-full w-full flex flex-col overflow-hidden">
-      <div className="mb-1.5 sm:mb-2 pb-1 sm:pb-1.5 border-b border-border/50 shrink-0">
+      <div className="mb-1.5 sm:mb-2 pb-1 sm:pb-1.5 border-b border-border/50 shrink-0 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <h3 className="font-semibold text-xs sm:text-sm text-foreground">
             Race Status
@@ -44,6 +72,72 @@ export function RaceHUD({
           <span className="text-[10px] sm:text-xs text-muted-foreground font-mono shrink-0">
             {models.length} models
           </span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {!isRunning ? (
+            <Button
+              size="sm"
+              onClick={onStartRace}
+              disabled={models.length === 0}
+              className="gap-1.5 h-7 text-xs"
+            >
+              <Play className="w-3 h-3" />
+              Start
+            </Button>
+          ) : isPaused ? (
+            <Button
+              size="sm"
+              onClick={onResumeRace}
+              className="gap-1.5 h-7 text-xs"
+            >
+              <Play className="w-3 h-3" />
+              Resume
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={onPauseRace}
+              className="gap-1.5 h-7 text-xs"
+            >
+              <Pause className="w-3 h-3" />
+              Pause
+            </Button>
+          )}
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onStopRace}
+            disabled={!isRunning}
+            className="gap-1.5 h-7 text-xs"
+          >
+            <Square className="w-3 h-3" />
+            Stop
+          </Button>
+
+          {!hideControlButtons && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onRegenerateMaze}
+                className="gap-1.5 h-7 text-xs"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Regenerate
+              </Button>
+
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={onReset}
+                className="gap-1.5 h-7 text-xs"
+              >
+                <RotateCcw className="w-3 h-3" />
+                Reset
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -155,33 +249,18 @@ export function RaceHUD({
                             className="flex items-center gap-1 sm:gap-1.5 text-[9px] sm:text-[10px] text-accent-foreground"
                           >
                             <Loader2 className="w-2.5 h-2.5 sm:w-3 sm:h-3 animate-spin shrink-0" />
-                            <span className="truncate">Requesting...</span>
+                            <span className="truncate">Requesting move...</span>
                           </motion.div>
                         )}
 
                         {currentStatus === "idle" && latestMessage && (
                           <motion.div
                             key={`response-${latestMessage.timestamp}`}
-                            initial={{ opacity: 0, y: -3 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="space-y-0.5"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="text-[9px] sm:text-[10px] font-mono text-foreground break-words line-clamp-2"
                           >
-                            <div className="flex items-center justify-between gap-1 text-[9px] sm:text-[10px] text-muted-foreground">
-                              <span className="truncate">
-                                Step {latestMessage.stepNumber}
-                              </span>
-                              <span className="font-mono text-[8px] sm:text-[9px] shrink-0">
-                                {new Date(
-                                  latestMessage.timestamp,
-                                ).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </span>
-                            </div>
-                            <div className="text-[9px] sm:text-[10px] font-mono bg-muted/30 rounded px-1 sm:px-1.5 py-0.5 sm:py-1 text-foreground break-words line-clamp-2">
-                              {latestMessage.response}
-                            </div>
+                            {latestMessage.response}
                           </motion.div>
                         )}
 

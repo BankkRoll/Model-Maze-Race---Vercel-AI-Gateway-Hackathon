@@ -2,8 +2,16 @@
 
 /**
  * Live AI chat panel showing real-time thinking and responses
+ * Displays model reasoning, status updates, and move responses
+ *
+ * @module AIChatPanel
  */
 
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/game/ai-elements/reasoning";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AIChatMessage, AIStatus, ModelState } from "@/types";
@@ -103,10 +111,24 @@ function ModelChatSection({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex items-center gap-2 text-xs text-primary py-2"
+            className="space-y-2 py-2"
           >
-            <Brain className="w-4 h-4 animate-pulse" />
-            <span>Analyzing maze...</span>
+            {latestMessage?.reasoning &&
+            model.config.capabilities?.reasoning ? (
+              <Reasoning
+                isStreaming={true}
+                defaultOpen={true}
+                className="w-full"
+              >
+                <ReasoningTrigger />
+                <ReasoningContent>{latestMessage.reasoning}</ReasoningContent>
+              </Reasoning>
+            ) : (
+              <div className="flex items-center gap-2 text-xs text-primary">
+                <Brain className="w-4 h-4 animate-pulse" />
+                <span>Analyzing maze...</span>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -116,24 +138,47 @@ function ModelChatSection({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex items-center gap-2 text-xs text-accent-foreground py-2"
+            className="space-y-2 py-2"
           >
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>Requesting move from AI...</span>
+            {latestMessage?.reasoning &&
+              model.config.capabilities?.reasoning && (
+                <Reasoning
+                  isStreaming={true}
+                  defaultOpen={true}
+                  className="w-full"
+                >
+                  <ReasoningTrigger />
+                  <ReasoningContent>{latestMessage.reasoning}</ReasoningContent>
+                </Reasoning>
+              )}
+            {(!latestMessage?.reasoning ||
+              !model.config.capabilities?.reasoning) && (
+              <div className="flex items-center gap-2 text-xs text-accent-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Requesting move from AI...</span>
+              </div>
+            )}
           </motion.div>
         )}
 
         {currentStatus === "idle" && latestMessage && (
           <motion.div
             key={`response-${latestMessage.timestamp}`}
-            initial={{ opacity: 0, y: -5 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="py-2"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="py-2 space-y-2"
           >
-            <div className="text-xs text-muted-foreground mb-1">
-              Step {latestMessage.stepNumber}:
-            </div>
-            <div className="text-sm font-mono bg-muted/30 rounded px-2 py-1.5 text-foreground break-words">
+            {latestMessage.reasoning && (
+              <Reasoning
+                isStreaming={false}
+                defaultOpen={false}
+                className="w-full"
+              >
+                <ReasoningTrigger />
+                <ReasoningContent>{latestMessage.reasoning}</ReasoningContent>
+              </Reasoning>
+            )}
+            <div className="text-sm font-mono text-foreground break-words">
               {latestMessage.response}
             </div>
           </motion.div>

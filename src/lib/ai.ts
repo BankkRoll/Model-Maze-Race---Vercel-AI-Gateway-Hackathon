@@ -5,38 +5,152 @@
  * @module ai
  */
 
-import type { AvailableModel, Direction, VisibleArea } from "@/types";
-import { createGateway, generateText } from "ai";
-import { formatVisibleAreaForPrompt } from "./maze";
+import type {
+  AvailableModel,
+  Direction,
+  ModelCapabilities,
+  Position,
+  VisibleArea,
+} from "@/types";
+import { createGateway, gateway, generateText, streamText } from "ai";
+import {
+  countVisits,
+  detectLoop,
+  formatVisibleAreaForPrompt,
+  getUnexploredDirections,
+} from "./maze";
 
 /**
  * Create the prompt for the AI model to make a move
+ * Includes full path context, loop detection, and backtracking awareness
  *
  * @param visible - The 3x3 visible area around the model
  * @param moveHistory - History of previous moves
  * @param stepCount - Current step number
+ * @param pathTaken - Array of all positions visited
+ * @param currentPosition - Current position of the model
  * @returns Formatted prompt string for the AI model
  */
 function createMovePrompt(
   visible: VisibleArea,
   moveHistory: Direction[],
   stepCount: number,
+  pathTaken: Position[],
+  currentPosition: Position,
 ): string {
-  const historyText = moveHistory.slice(-5).join(", ") || "none";
-  const gridText = formatVisibleAreaForPrompt(visible);
+  const historyText = moveHistory.slice(-10).join(", ") || "none";
+  const gridText = formatVisibleAreaForPrompt(
+    visible,
+    pathTaken,
+    currentPosition,
+  );
 
-  return `You are navigating a maze. You cannot see the entire maze, only your immediate surroundings.
+  const currentVisitCount = countVisits(pathTaken, currentPosition);
+
+  const hasLoop = detectLoop(moveHistory, 8);
+  const loopWarning = hasLoop
+    ? `\n⚠️ LOOP DETECTED: You've been repeating a pattern in your recent moves. Try a different direction to break the cycle.`
+    : "";
+
+  const recentPath = pathTaken.slice(-15);
+  const pathSummary = recentPath
+    .map((pos, idx) => {
+      const visitCount = countVisits(pathTaken, pos);
+      const stepsAgo = pathTaken.length - idx - 1;
+      const marker =
+        stepsAgo === 0
+          ? "(current)"
+          : stepsAgo === 1
+            ? "(1 step ago)"
+            : `(${stepsAgo} steps ago)`;
+      return visitCount > 1
+        ? `- (${pos.x},${pos.y}) - visited ${visitCount} times ${marker}`
+        : `- (${pos.x},${pos.y}) ${marker}`;
+    })
+    .join("\n");
+
+  const backtrackWarning =
+    currentVisitCount > 1
+      ? `\n⚠️ BACKTRACKING: You've returned to position (${currentPosition.x},${currentPosition.y}) which you've visited ${currentVisitCount} times. Consider exploring new areas.`
+      : "";
+
+  const unexplored = getUnexploredDirections(
+    currentPosition,
+    pathTaken,
+    visible,
+  );
+  const unexploredHint =
+    unexplored.length > 0
+      ? `\n💡 Unexplored directions from here: ${unexplored.join(", ")}. These lead to areas you haven't visited yet.`
+      : "";
+
+  const directionVisits: Record<Direction, number> = {
+    up: 0,
+    down: 0,
+    left: 0,
+    right: 0,
+  };
+
+  const directionOffsets: Record<Direction, { x: number; y: number }> = {
+    up: { x: 0, y: -1 },
+    down: { x: 0, y: 1 },
+    left: { x: -1, y: 0 },
+    right: { x: 1, y: 0 },
+  };
+
+  for (const [dir, offset] of Object.entries(directionOffsets)) {
+    const nextPos: Position = {
+      x: currentPosition.x + offset.x,
+      y: currentPosition.y + offset.y,
+    };
+    directionVisits[dir as Direction] = countVisits(pathTaken, nextPos);
+  }
+
+  const directionInfo = Object.entries(directionVisits)
+    .filter(([_, count]) => count > 0)
+    .map(
+      ([dir, count]) =>
+        `- ${dir}: visited ${count} time${count > 1 ? "s" : ""}`,
+    )
+    .join("\n");
+
+  const exploredDirections =
+    directionInfo.length > 0
+      ? `\nFrom your current position, you've already explored:\n${directionInfo}`
+      : "";
+
+  return `You are navigating a maze to reach the exit. Your goal is to reach the exit (E) in as few steps as possible.
+
+You cannot see the entire maze, only your immediate 3×3 surroundings. You must use your memory of where you've been to navigate efficiently.
 
 Current step: ${stepCount}
+Current position: (${currentPosition.x}, ${currentPosition.y})
 
 Your visible area (3×3 grid around you, you are in the center):
 ${gridText}
 
-Legend: █ = wall, · = open path, S = start, E = exit, ? = unknown
+Legend:
+  █ = wall (cannot move here)
+  · = open path
+  S = start position
+  E = exit (your goal!)
+  ? = unknown (out of bounds or not visible)
+  V = visited before (you've been here)
+  V2, V3, etc. = visited multiple times (avoid revisiting)
 
-Recent moves: ${historyText}
+Path History (last 15 positions):
+${pathSummary || "No previous positions"}
+
+Recent moves (last 10): ${historyText}
+${loopWarning}${backtrackWarning}${exploredDirections}${unexploredHint}
 
 Available actions: up, down, left, right
+
+IMPORTANT: 
+- Avoid revisiting positions you've already explored (marked with V)
+- Break any loops by trying unexplored directions
+- Move towards the exit (E) when you can see it
+- Explore systematically to avoid getting stuck
 
 Respond with ONLY ONE WORD - the direction you want to move: up, down, left, or right.`;
 }
@@ -44,26 +158,34 @@ Respond with ONLY ONE WORD - the direction you want to move: up, down, left, or 
 /**
  * Request a move from an AI model via AI Gateway
  * Sends the current visible area and move history to the model and parses the response
+ * Supports reasoning for models that have this capability
  *
  * @param modelString - Model identifier (e.g., "openai/gpt-4o-mini")
  * @param visible - The 3x3 visible area around the model's current position
  * @param moveHistory - Array of previous move directions
  * @param stepCount - Current step number in the race
+ * @param pathTaken - Array of all positions visited by the model
+ * @param currentPosition - Current position of the model
  * @param apiKey - Optional API key for custom gateway authentication
+ * @param capabilities - Optional model capabilities
  * @param onStatusUpdate - Optional callback for status updates during the request
- * @returns Promise resolving to the parsed direction, raw response, and prompt used
+ * @param onReasoningUpdate - Optional callback for reasoning text updates
+ * @returns Promise resolving to the parsed direction, raw response, reasoning, and prompt used
  *
  * @example
  * ```tsx
  * const result = await requestModelMove(
- *   "openai/gpt-4o-mini",
+ *   "deepseek/deepseek-r1",
  *   visibleArea,
  *   ["up", "right", "down"],
  *   5,
+ *   [{x:1,y:1}, {x:1,y:2}, ...],
+ *   {x:1, y:2},
  *   "api-key",
- *   (status, text) => console.log(status, text)
+ *   { reasoning: true },
+ *   (status, text) => console.log(status, text),
+ *   (reasoning) => console.log("Reasoning:", reasoning)
  * )
- * // result.direction === "left" | "right" | "up" | "down" | null
  * ```
  */
 export async function requestModelMove(
@@ -71,17 +193,29 @@ export async function requestModelMove(
   visible: VisibleArea,
   moveHistory: Direction[],
   stepCount: number,
+  pathTaken: Position[],
+  currentPosition: Position,
   apiKey?: string,
+  capabilities?: ModelCapabilities,
   onStatusUpdate?: (
     status: "thinking" | "responding" | "complete",
     text?: string,
   ) => void,
+  onReasoningUpdate?: (reasoning: string) => void,
 ): Promise<{
   direction: Direction | null;
   rawResponse: string;
+  reasoning?: string;
   prompt: string;
 }> {
-  const prompt = createMovePrompt(visible, moveHistory, stepCount);
+  const prompt = createMovePrompt(
+    visible,
+    moveHistory,
+    stepCount,
+    pathTaken,
+    currentPosition,
+  );
+  const supportsReasoning = capabilities?.reasoning ?? false;
 
   try {
     onStatusUpdate?.("thinking");
@@ -95,28 +229,63 @@ export async function requestModelMove(
       model = customGateway(modelString);
     }
 
-    const config = {
-      model,
-      prompt,
-      maxTokens: 10,
-      temperature: 0.7,
-    };
+    if (supportsReasoning) {
+      let reasoningText = "";
+      let responseText = "";
 
-    onStatusUpdate?.("responding");
+      const result = streamText({
+        model,
+        prompt,
+        temperature: 0.7,
+      });
 
-    const { text } = await generateText(config);
+      for await (const part of result.fullStream) {
+        if (part.type === "reasoning-delta") {
+          reasoningText += part.text;
+          onReasoningUpdate?.(reasoningText);
+        } else if (part.type === "text-delta") {
+          responseText += part.text;
+          onStatusUpdate?.("responding", responseText);
+        }
+      }
 
-    onStatusUpdate?.("complete", text);
+      const fullText = await result.text;
+      const fullReasoning = (await result.reasoningText) || reasoningText;
 
-    const direction = parseDirectionFromResponse(text);
+      onStatusUpdate?.("complete", fullText);
 
-    return {
-      direction,
-      rawResponse: text,
-      prompt,
-    };
+      const direction = parseDirectionFromResponse(fullText);
+
+      return {
+        direction,
+        rawResponse: fullText,
+        reasoning: fullReasoning || undefined,
+        prompt,
+      };
+    } else {
+      const config = {
+        model,
+        prompt,
+        maxTokens: 10,
+        temperature: 0.7,
+      };
+
+      onStatusUpdate?.("responding");
+
+      const { text } = await generateText(config);
+
+      onStatusUpdate?.("complete", text);
+
+      const direction = parseDirectionFromResponse(text);
+
+      return {
+        direction,
+        rawResponse: text,
+        prompt,
+      };
+    }
   } catch (error) {
-    console.error("[v0] AI request failed:", error);
+    console.error("AI request failed:", error);
     onStatusUpdate?.(
       "complete",
       `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -169,99 +338,89 @@ export async function fetchAvailableModels(
   apiKey?: string,
 ): Promise<AvailableModel[]> {
   try {
-    console.log("[v0] Fetching available models from AI Gateway...");
-
     let result;
     if (apiKey) {
       const customGateway = createGateway({ apiKey });
       result = await customGateway.getAvailableModels();
     } else {
-      const { gateway } = await import("ai");
       result = await gateway.getAvailableModels();
     }
 
-    console.log("[v0] Found", result.models.length, "models");
+    const languageModels = result.models.filter(
+      (model: any) => !model.modelType || model.modelType === "language",
+    );
 
-    const models: AvailableModel[] = result.models.map((model) => ({
-      id: model.id,
-      name: model.name || model.id,
-      description: model.description ?? undefined,
-      pricing: model.pricing
+    const models: AvailableModel[] = languageModels.map((model: any) => {
+      const capabilities: { reasoning?: boolean } = {};
+
+      const modelId = (model.id || "").toLowerCase();
+
+      if (model.capabilities?.reasoning !== undefined) {
+        capabilities.reasoning = Boolean(model.capabilities.reasoning);
+      } else if (model.supportsReasoning !== undefined) {
+        capabilities.reasoning = Boolean(model.supportsReasoning);
+      } else {
+        capabilities.reasoning =
+          modelId.includes("deepseek-r1") ||
+          modelId.includes("deepseek-reasoner") ||
+          modelId.includes("deepseek-v3") ||
+          modelId.includes("grok") ||
+          modelId.includes("claude-sonnet-4") ||
+          modelId.includes("claude-opus-4") ||
+          modelId.includes("thinking") ||
+          modelId.includes("reasoning") ||
+          modelId.includes("o1") ||
+          modelId.includes("o3");
+      }
+
+      const specification = model.specification
         ? {
-            input:
-              typeof model.pricing.input === "number"
-                ? model.pricing.input
-                : Number.parseFloat(String(model.pricing.input)),
-            output:
-              typeof model.pricing.output === "number"
-                ? model.pricing.output
-                : Number.parseFloat(String(model.pricing.output)),
+            specificationVersion: model.specification.specificationVersion,
+            provider: model.specification.provider,
+            modelId: model.specification.modelId,
           }
-        : undefined,
-    }));
+        : undefined;
+
+      return {
+        id: model.id,
+        name: model.name || model.id,
+        description: model.description ?? undefined,
+        pricing: model.pricing
+          ? {
+              input:
+                typeof model.pricing.input === "number"
+                  ? model.pricing.input
+                  : Number.parseFloat(String(model.pricing.input)),
+              output:
+                typeof model.pricing.output === "number"
+                  ? model.pricing.output
+                  : Number.parseFloat(String(model.pricing.output)),
+              cachedInputTokens: model.pricing.cachedInputTokens
+                ? typeof model.pricing.cachedInputTokens === "number"
+                  ? model.pricing.cachedInputTokens
+                  : Number.parseFloat(String(model.pricing.cachedInputTokens))
+                : undefined,
+              cacheCreationInputTokens: model.pricing.cacheCreationInputTokens
+                ? typeof model.pricing.cacheCreationInputTokens === "number"
+                  ? model.pricing.cacheCreationInputTokens
+                  : Number.parseFloat(
+                      String(model.pricing.cacheCreationInputTokens),
+                    )
+                : undefined,
+            }
+          : undefined,
+        specification,
+        modelType: model.modelType || "language",
+        capabilities: capabilities.reasoning ? capabilities : undefined,
+      };
+    });
+
+    models.sort((a, b) => a.name.localeCompare(b.name));
 
     return models;
   } catch (error) {
-    console.error("[v0] Failed to fetch models from gateway:", error);
-
-    const fallbackModels: AvailableModel[] = [
-      {
-        id: "openai/gpt-4o-mini",
-        name: "GPT-4o Mini",
-        description: "Fast and efficient OpenAI model",
-        pricing: { input: 0.00015, output: 0.0006 },
-      },
-      {
-        id: "openai/gpt-4o",
-        name: "GPT-4o",
-        description: "Powerful multimodal model",
-        pricing: { input: 0.0025, output: 0.01 },
-      },
-      {
-        id: "anthropic/claude-sonnet-4",
-        name: "Claude Sonnet 4",
-        description: "Balanced performance and speed",
-        pricing: { input: 0.003, output: 0.015 },
-      },
-      {
-        id: "anthropic/claude-3-5-sonnet-20241022",
-        name: "Claude 3.5 Sonnet",
-        description: "Previous generation Claude",
-        pricing: { input: 0.003, output: 0.015 },
-      },
-      {
-        id: "xai/grok-beta",
-        name: "Grok Beta",
-        description: "xAI flagship model",
-        pricing: { input: 0.0005, output: 0.001 },
-      },
-      {
-        id: "google/gemini-2.0-flash-exp",
-        name: "Gemini 2.0 Flash",
-        description: "Google fast experimental model",
-        pricing: { input: 0.0001, output: 0.0002 },
-      },
-      {
-        id: "deepseek/deepseek-chat",
-        name: "DeepSeek Chat",
-        description: "Cost-effective reasoning model",
-        pricing: { input: 0.00014, output: 0.00028 },
-      },
-      {
-        id: "meta-llama/llama-3.3-70b-instruct",
-        name: "Llama 3.3 70B",
-        description: "Meta's powerful instruct model",
-        pricing: { input: 0.0004, output: 0.0004 },
-      },
-      {
-        id: "perplexity/llama-3.1-sonar-small-128k-online",
-        name: "Sonar Small",
-        description: "Perplexity online model",
-        pricing: { input: 0.0002, output: 0.0002 },
-      },
-    ];
-
-    return fallbackModels;
+    console.error("Failed to fetch models from gateway:", error);
+    throw error;
   }
 }
 

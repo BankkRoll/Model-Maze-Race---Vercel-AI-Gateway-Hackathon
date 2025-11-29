@@ -33,7 +33,7 @@ interface ApiKeyContextType {
   /** Primary API key string (gateway key or first provider key), or null if not set */
   primaryKey: string | null;
   /** Function to set and save a new API key configuration */
-  setKeyConfig: (config: ApiKeyConfig) => void;
+  setKeyConfig: (config: ApiKeyConfig, expiresInDays?: number) => Promise<void>;
   /** Function to clear the stored API key configuration */
   clearKey: () => void;
   /** Whether the context is still loading the initial configuration */
@@ -63,24 +63,39 @@ export function ApiKeyProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const config = loadApiKeyConfig();
-    const primary = getPrimaryApiKey();
-    setKeyConfigState(config);
-    setPrimaryKey(primary);
-    setIsLoading(false);
+    async function loadConfig() {
+      const config = await loadApiKeyConfig();
+      const primary = await getPrimaryApiKey();
+      setKeyConfigState(config);
+      setPrimaryKey(primary);
+      setIsLoading(false);
+    }
+    loadConfig();
   }, []);
 
   /**
    * Sets and saves a new API key configuration
    * Updates both the context state and localStorage
+   * For OIDC type, checks for access token in cookies
    *
    * @param config - The API key configuration to save
+   * @param expiresInDays - Optional number of days until key expires
+   * @returns Promise that resolves when save is complete
    */
-  const setKeyConfig = (config: ApiKeyConfig) => {
-    saveApiKeyConfig(config);
+  const setKeyConfig = async (
+    config: ApiKeyConfig,
+    expiresInDays?: number,
+  ): Promise<void> => {
+    await saveApiKeyConfig(config, expiresInDays);
     setKeyConfigState(config);
 
-    if (config.type === "gateway" && config.gatewayKey) {
+    if (config.type === "oidc") {
+      /**
+       * For OIDC, primaryKey is null - Gateway will use OIDC automatically when deployed.
+       * In local dev, user should use Gateway API key instead.
+       */
+      setPrimaryKey(null);
+    } else if (config.type === "gateway" && config.gatewayKey) {
       setPrimaryKey(config.gatewayKey);
     } else if (config.type === "provider" && config.providerKeys) {
       const firstKey =

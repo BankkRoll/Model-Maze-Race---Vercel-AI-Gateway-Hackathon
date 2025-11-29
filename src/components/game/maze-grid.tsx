@@ -5,6 +5,7 @@
  * Enhanced with darker walls, optimal path visualization in debug mode
  */
 
+import { findAllPaths } from "@/lib/maze";
 import { cn } from "@/lib/utils";
 import type { MazeGrid, ModelState, Position } from "@/types";
 import { motion } from "motion/react";
@@ -36,13 +37,54 @@ export function MazeGridComponent({
       : 800;
   const cellSize = Math.max(Math.floor(maxSize / Math.max(width, height)), 8);
 
-  const optimalPath = useMemo(() => {
-    if (!debugMode || !startPos) return null;
-    return calculateOptimalPathPositions(maze, startPos, exitPos);
+  const allPaths = useMemo(() => {
+    if (!debugMode || !startPos) return [];
+    try {
+      const paths = findAllPaths(
+        maze,
+        startPos,
+        exitPos,
+        30,
+        undefined,
+        2,
+        0.85,
+      );
+      return paths;
+    } catch (error) {
+      console.error("[Pathfinder] Error finding paths:", error);
+      return [];
+    }
   }, [debugMode, maze, startPos, exitPos]);
 
+  const reachableCells = useMemo(() => {
+    if (!debugMode || allPaths.length === 0) return new Set<string>();
+    const cells = new Set<string>();
+    for (const path of allPaths) {
+      for (const pos of path) {
+        cells.add(`${pos.x},${pos.y}`);
+      }
+    }
+    return cells;
+  }, [debugMode, allPaths]);
+
   return (
-    <div className="flex items-center justify-center p-4">
+    <div className="flex flex-col items-center justify-center p-4 gap-2">
+      {debugMode && allPaths.length > 0 && (
+        <div className="text-xs text-muted-foreground font-mono bg-muted/50 px-3 py-1.5 rounded-md border border-border/50">
+          <span className="font-semibold text-foreground">Unique Paths: </span>
+          {allPaths.length}
+          <span className="text-muted-foreground/70">
+            {" "}
+            (significantly different routes)
+          </span>
+          <span className="mx-2">|</span>
+          <span className="font-semibold text-foreground">Shortest: </span>
+          {allPaths[0]?.length} steps
+          <span className="mx-2">|</span>
+          <span className="font-semibold text-foreground">Longest: </span>
+          {allPaths[allPaths.length - 1]?.length} steps
+        </div>
+      )}
       <div
         className="relative rounded-lg overflow-hidden border-2 border-border shadow-2xl"
         style={{
@@ -62,9 +104,7 @@ export function MazeGridComponent({
             row.map((cell, x) => {
               const isExit = x === exitPos.x && y === exitPos.y;
               const isStart = startPos && x === startPos.x && y === startPos.y;
-              const isOnOptimalPath = optimalPath?.some(
-                (p) => p.x === x && p.y === y,
-              );
+              const isReachable = reachableCells.has(`${x},${y}`);
 
               return (
                 <div
@@ -81,12 +121,12 @@ export function MazeGridComponent({
                     !showFullMaze && cell === "wall" && "opacity-30",
                   )}
                 >
-                  {debugMode && isOnOptimalPath && cell !== "wall" && (
-                    <div className="absolute inset-0 bg-chart-3/10 border border-chart-3/30" />
+                  {debugMode && isReachable && cell !== "wall" && (
+                    <div className="absolute inset-0 bg-chart-3/15 border border-chart-3/30 z-0" />
                   )}
 
                   {isExit && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-accent/30">
+                    <div className="absolute inset-0 flex items-center justify-center bg-accent/30 z-10">
                       <div className="text-accent-foreground font-bold text-xs">
                         E
                       </div>
@@ -94,7 +134,7 @@ export function MazeGridComponent({
                   )}
 
                   {isStart && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-primary/30">
+                    <div className="absolute inset-0 flex items-center justify-center bg-primary/30 z-10">
                       <div className="text-primary-foreground font-bold text-xs">
                         S
                       </div>
@@ -106,19 +146,58 @@ export function MazeGridComponent({
           )}
         </div>
 
-        {debugMode && optimalPath && optimalPath.length > 1 && (
+        {debugMode && allPaths.length > 0 && (
           <svg
             className="absolute inset-0 pointer-events-none z-10"
             style={{ width: width * cellSize, height: height * cellSize }}
           >
-            <path
-              d={generatePathD(optimalPath, cellSize)}
-              stroke="var(--chart-3)"
-              strokeWidth="2"
-              fill="none"
-              strokeDasharray="4 4"
-              opacity="0.5"
-            />
+            {allPaths.map((path, pathIndex) => {
+              const shortestLength = allPaths[0]?.length || Infinity;
+              const pathLength = path.length;
+
+              const isShortest = pathIndex === 0;
+              const isShort = pathLength <= shortestLength * 1.2;
+              const isMedium = pathLength <= shortestLength * 1.5;
+
+              let strokeColor = "var(--chart-3)";
+              let strokeWidth = 2;
+              let opacity = 0.5;
+              let dashArray = "4 4";
+
+              if (isShortest) {
+                strokeColor = "var(--chart-1)";
+                strokeWidth = 3;
+                opacity = 0.9;
+                dashArray = "none";
+              } else if (isShort) {
+                strokeColor = "var(--chart-2)";
+                strokeWidth = 2;
+                opacity = 0.7;
+                dashArray = "3 3";
+              } else if (isMedium) {
+                strokeColor = "var(--chart-3)";
+                strokeWidth = 1.5;
+                opacity = 0.5;
+                dashArray = "2 4";
+              } else {
+                strokeColor = "var(--chart-4)";
+                strokeWidth = 1;
+                opacity = 0.3;
+                dashArray = "1 5";
+              }
+
+              return (
+                <path
+                  key={`path-${pathIndex}`}
+                  d={generatePathD(path, cellSize)}
+                  stroke={strokeColor}
+                  strokeWidth={strokeWidth}
+                  fill="none"
+                  strokeDasharray={dashArray}
+                  opacity={opacity}
+                />
+              );
+            })}
           </svg>
         )}
 
@@ -198,68 +277,6 @@ export function MazeGridComponent({
       </div>
     </div>
   );
-}
-
-/**
- * Calculate optimal path positions using BFS
- */
-function calculateOptimalPathPositions(
-  maze: MazeGrid,
-  start: Position,
-  exit: Position,
-): Position[] | null {
-  const queue: { pos: Position; path: Position[] }[] = [
-    { pos: start, path: [start] },
-  ];
-  const visited = new Set<string>([`${start.x},${start.y}`]);
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-
-    if (current.pos.x === exit.x && current.pos.y === exit.y) {
-      return current.path;
-    }
-
-    const directions = [
-      { x: 0, y: -1 },
-      { x: 1, y: 0 },
-      { x: 0, y: 1 },
-      { x: -1, y: 0 },
-    ];
-
-    for (const dir of directions) {
-      const next = {
-        x: current.pos.x + dir.x,
-        y: current.pos.y + dir.y,
-      };
-
-      const key = `${next.x},${next.y}`;
-      if (!visited.has(key) && isValidPosition(maze, next)) {
-        visited.add(key);
-        queue.push({
-          pos: next,
-          path: [...current.path, next],
-        });
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Check if position is valid
- */
-function isValidPosition(maze: MazeGrid, pos: Position): boolean {
-  if (
-    pos.y < 0 ||
-    pos.y >= maze.length ||
-    pos.x < 0 ||
-    pos.x >= maze[0].length
-  ) {
-    return false;
-  }
-  return maze[pos.y][pos.x] !== "wall";
 }
 
 /**

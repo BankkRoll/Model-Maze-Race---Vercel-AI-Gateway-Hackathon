@@ -8,7 +8,11 @@
  */
 
 import { requestModelMove } from "@/lib/ai";
-import { getVisibleArea, isValidMove } from "@/lib/maze";
+import {
+  getUnexploredDirections,
+  getVisibleArea,
+  isValidMove,
+} from "@/lib/maze";
 import type {
   AIChatMessage,
   AIStatus,
@@ -135,29 +139,102 @@ export function useModelRunner({
         }));
 
         if (status === "complete" && text) {
-          const message: AIChatMessage = {
-            modelId: modelState.config.id,
-            timestamp: Date.now(),
-            status: "complete",
-            response: text,
-            stepNumber: modelState.stepCount + 1,
-          };
-          setChatMessages((prev) => [...prev.slice(-50), message]);
+          setChatMessages((prev) => {
+            const existing = prev.find(
+              (m) =>
+                m.modelId === modelState.config.id &&
+                m.stepNumber === modelState.stepCount + 1,
+            );
+            if (existing) {
+              return prev.map((m) =>
+                m === existing
+                  ? { ...m, response: text, status: "complete" }
+                  : m,
+              );
+            }
+            return [
+              ...prev.slice(-50),
+              {
+                modelId: modelState.config.id,
+                timestamp: Date.now(),
+                status: "complete",
+                response: text,
+                stepNumber: modelState.stepCount + 1,
+              },
+            ];
+          });
         }
       };
 
-      const { direction, rawResponse, prompt } = await requestModelMove(
-        modelState.config.modelString,
-        visible,
-        modelState.moveHistory.map((m) => m.direction),
-        modelState.stepCount,
-        apiKey || undefined,
-        handleStatusUpdate,
-      );
+      const handleReasoningUpdate = (reasoning: string) => {
+        setChatMessages((prev) => {
+          const existing = prev.find(
+            (m) =>
+              m.modelId === modelState.config.id &&
+              m.stepNumber === modelState.stepCount + 1,
+          );
+          if (existing) {
+            return prev.map((m) => (m === existing ? { ...m, reasoning } : m));
+          }
+          return [
+            ...prev.slice(-50),
+            {
+              modelId: modelState.config.id,
+              timestamp: Date.now(),
+              status: "thinking",
+              reasoning,
+              stepNumber: modelState.stepCount + 1,
+            },
+          ];
+        });
+      };
+
+      const { direction, rawResponse, reasoning, prompt } =
+        await requestModelMove(
+          modelState.config.modelString,
+          visible,
+          modelState.moveHistory.map((m) => m.direction),
+          modelState.stepCount,
+          modelState.pathTaken,
+          modelState.position,
+          apiKey || undefined,
+          modelState.config.capabilities,
+          handleStatusUpdate,
+          handleReasoningUpdate,
+        );
+
+      if (reasoning) {
+        setChatMessages((prev) => {
+          const existing = prev.find(
+            (m) =>
+              m.modelId === modelState.config.id &&
+              m.stepNumber === modelState.stepCount + 1,
+          );
+          if (existing) {
+            return prev.map((m) => (m === existing ? { ...m, reasoning } : m));
+          }
+          return prev;
+        });
+      }
 
       const moveTime = performance.now() - startTime;
 
       if (debugMode) {
+        const directions: Direction[] = ["up", "down", "left", "right"];
+        const validMoves: Direction[] = [];
+        for (const dir of directions) {
+          const testPos = calculateNewPosition(modelState.position, dir);
+          if (isValidMove(maze, testPos)) {
+            validMoves.push(dir);
+          }
+        }
+
+        const unexploredDirections = getUnexploredDirections(
+          modelState.position,
+          modelState.pathTaken,
+          visible,
+        );
+
         const debugInfo: DebugInfo = {
           modelId: modelState.config.id,
           step: modelState.stepCount + 1,
@@ -165,6 +242,10 @@ export function useModelRunner({
           response: rawResponse,
           visibleArea: visible,
           timestamp: Date.now(),
+          position: modelState.position,
+          pathTaken: [...modelState.pathTaken],
+          validMoves,
+          unexploredDirections,
         };
         setDebugLogs((prev) => [...prev, debugInfo]);
       }

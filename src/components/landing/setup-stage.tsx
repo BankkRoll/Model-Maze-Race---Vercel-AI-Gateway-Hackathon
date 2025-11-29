@@ -7,11 +7,13 @@
  * @module SetupStage
  */
 
-import { HeroDemo } from "@/components/hero-demo";
-import { ModelSelector } from "@/components/model-selector";
-import { SettingsPanel } from "@/components/settings-panel";
-import type { MazeConfig, ModelConfig } from "@/types";
+import { HeroDemo } from "@/components/landing/hero-demo";
+import { ModelSelector } from "@/components/landing/model-selector";
+import { RacePreviewCard } from "@/components/landing/race-preview-card";
+import { SettingsPanel } from "@/components/landing/settings-panel";
+import type { AvailableModel, MazeConfig, ModelConfig } from "@/types";
 import { motion } from "motion/react";
+import { useState } from "react";
 
 /**
  * Props for the SetupStage component
@@ -68,6 +70,8 @@ export function SetupStage({
   onModelsSelected,
   apiKey,
 }: SetupStageProps) {
+  const [selectedModels, setSelectedModels] = useState<AvailableModel[]>([]);
+
   return (
     <>
       <motion.section
@@ -164,28 +168,78 @@ export function SetupStage({
             Setup Your Race
           </h2>
           <p className="text-muted-foreground text-sm sm:text-base md:text-lg px-2">
-            Configure the maze and select AI models to compete. Press Start to
-            launch a round and watch the competition play out with a final
-            ranked list based on performance.
+            Configure the maze, select AI models, and preview your racers before
+            starting.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 w-full">
-          <div className="w-full min-w-0">
+        <div className="space-y-4 sm:space-y-6 w-full">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs sm:text-sm font-bold text-primary">
+                  1
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-semibold text-foreground">
+                Step 1: Configure Maze
+              </h3>
+            </div>
             <SettingsPanel
               onConfigChange={onConfigChange}
               onSpeedChange={onSpeedChange}
               disabled={!hasApiKey}
             />
-          </div>
+          </motion.div>
 
-          <div className="w-full min-w-0">
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs sm:text-sm font-bold text-primary">
+                  2
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-semibold text-foreground">
+                Step 2: Select Models
+              </h3>
+            </div>
             <ModelSelector
               onModelsSelected={onModelsSelected}
+              onSelectionChange={setSelectedModels}
               disabled={!hasApiKey}
               apiKey={apiKey}
             />
-          </div>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs sm:text-sm font-bold text-primary">
+                  3
+                </span>
+              </div>
+              <h3 className="text-base sm:text-lg font-semibold text-foreground">
+                Step 3: Preview & Start
+              </h3>
+            </div>
+            <RacePreviewCard
+              selectedModels={selectedModels}
+              onStart={onModelsSelected}
+              disabled={!hasApiKey}
+            />
+          </motion.div>
         </div>
 
         {!hasApiKey && (

@@ -5,6 +5,7 @@
  * @module storage
  */
 
+import { decryptKey, encryptKey } from "@/lib/api-key-crypto";
 import type { ApiKeyConfig, AppSettings } from "@/types";
 
 /** Storage keys used in localStorage */
@@ -14,157 +15,184 @@ const STORAGE_KEYS = {
 } as const;
 
 /**
- * Simple XOR encryption for API key storage
- * Not cryptographically secure, but provides basic obfuscation
+ * Extended API key configuration with metadata
  *
- * @param key - The API key to encrypt
- * @returns Base64-encoded encrypted key
+ * @interface ApiKeyConfigWithMetadata
  */
-function encryptKey(key: string): string {
-  const secret = "maze-race-2025";
-  return btoa(
-    key
-      .split("")
-      .map((char, i) =>
-        String.fromCharCode(
-          char.charCodeAt(0) ^ secret.charCodeAt(i % secret.length),
-        ),
-      )
-      .join(""),
-  );
-}
-
-/**
- * Decrypt the stored API key
- *
- * @param encrypted - The encrypted key string
- * @returns Decrypted API key, or empty string if decryption fails
- */
-function decryptKey(encrypted: string): string {
-  const secret = "maze-race-2025";
-  try {
-    return atob(encrypted)
-      .split("")
-      .map((char, i) =>
-        String.fromCharCode(
-          char.charCodeAt(0) ^ secret.charCodeAt(i % secret.length),
-        ),
-      )
-      .join("");
-  } catch {
-    return "";
-  }
+interface ApiKeyConfigWithMetadata {
+  /** The API key configuration */
+  config: ApiKeyConfig;
+  /** Timestamp when the key was saved */
+  savedAt: number;
+  /** Optional expiration timestamp (in milliseconds) */
+  expiresAt?: number;
+  /** Version of the storage format */
+  version: number;
 }
 
 /**
  * Save API key configuration to localStorage (encrypted)
- * All keys are encrypted before storage for basic security
+ * All keys are encrypted before storage using Web Crypto API
  *
  * @param config - The API key configuration to save
+ * @param expiresInDays - Optional number of days until key expires (default: no expiration)
+ * @returns Promise that resolves when save is complete
  *
  * @example
  * ```tsx
- * saveApiKeyConfig({
+ * await saveApiKeyConfig({
  *   type: "gateway",
  *   gatewayKey: "your-api-key"
- * })
+ * }, 90) // Expires in 90 days
  * ```
  */
-export function saveApiKeyConfig(config: ApiKeyConfig): void {
+export async function saveApiKeyConfig(
+  config: ApiKeyConfig,
+  expiresInDays?: number,
+): Promise<void> {
   if (typeof window === "undefined") return;
   try {
+    const now = Date.now();
+    const expiresAt = expiresInDays
+      ? now + expiresInDays * 24 * 60 * 60 * 1000
+      : undefined;
+
+    /**
+     * Encrypt all keys (OIDC type has no keys to encrypt)
+     */
     const encryptedConfig: ApiKeyConfig = {
       type: config.type,
-      gatewayKey: config.gatewayKey ? encryptKey(config.gatewayKey) : undefined,
-      providerKeys: config.providerKeys
-        ? {
-            openai: config.providerKeys.openai
-              ? encryptKey(config.providerKeys.openai)
-              : undefined,
-            anthropic: config.providerKeys.anthropic
-              ? encryptKey(config.providerKeys.anthropic)
-              : undefined,
-            xai: config.providerKeys.xai
-              ? encryptKey(config.providerKeys.xai)
-              : undefined,
-            google: config.providerKeys.google
-              ? encryptKey(config.providerKeys.google)
-              : undefined,
-            mistral: config.providerKeys.mistral
-              ? encryptKey(config.providerKeys.mistral)
-              : undefined,
-            deepseek: config.providerKeys.deepseek
-              ? encryptKey(config.providerKeys.deepseek)
-              : undefined,
-            groq: config.providerKeys.groq
-              ? encryptKey(config.providerKeys.groq)
-              : undefined,
-          }
-        : undefined,
+      ...(config.type === "oidc"
+        ? {}
+        : config.type === "gateway"
+          ? {
+              gatewayKey: config.gatewayKey
+                ? await encryptKey(config.gatewayKey)
+                : undefined,
+            }
+          : {
+              providerKeys: config.providerKeys
+                ? {
+                    openai: config.providerKeys.openai
+                      ? await encryptKey(config.providerKeys.openai)
+                      : undefined,
+                    anthropic: config.providerKeys.anthropic
+                      ? await encryptKey(config.providerKeys.anthropic)
+                      : undefined,
+                    xai: config.providerKeys.xai
+                      ? await encryptKey(config.providerKeys.xai)
+                      : undefined,
+                    google: config.providerKeys.google
+                      ? await encryptKey(config.providerKeys.google)
+                      : undefined,
+                    mistral: config.providerKeys.mistral
+                      ? await encryptKey(config.providerKeys.mistral)
+                      : undefined,
+                    deepseek: config.providerKeys.deepseek
+                      ? await encryptKey(config.providerKeys.deepseek)
+                      : undefined,
+                    groq: config.providerKeys.groq
+                      ? await encryptKey(config.providerKeys.groq)
+                      : undefined,
+                  }
+                : undefined,
+            }),
     };
-    localStorage.setItem(
-      STORAGE_KEYS.API_KEY_CONFIG,
-      JSON.stringify(encryptedConfig),
-    );
+
+    const metadata: ApiKeyConfigWithMetadata = {
+      config: encryptedConfig,
+      savedAt: now,
+      expiresAt,
+      version: 2,
+    };
+
+    localStorage.setItem(STORAGE_KEYS.API_KEY_CONFIG, JSON.stringify(metadata));
   } catch (error) {
-    console.error("[v0] Failed to save API key config:", error);
+    console.error("Failed to save API key config:", error);
+    throw error;
   }
 }
 
 /**
  * Load API key configuration from localStorage (decrypted)
+ * Handles both old format (version 1) and new format (version 2 with metadata)
+ * Automatically checks for expiration
  *
- * @returns The decrypted API key configuration, or null if not found
+ * @returns The decrypted API key configuration, or null if not found or expired
  *
  * @example
  * ```tsx
- * const config = loadApiKeyConfig()
+ * const config = await loadApiKeyConfig()
  * if (config) {
  *   // Use the configuration
  * }
  * ```
  */
-export function loadApiKeyConfig(): ApiKeyConfig | null {
+export async function loadApiKeyConfig(): Promise<ApiKeyConfig | null> {
   if (typeof window === "undefined") return null;
   try {
     const stored = localStorage.getItem(STORAGE_KEYS.API_KEY_CONFIG);
     if (!stored) return null;
 
-    const encryptedConfig: ApiKeyConfig = JSON.parse(stored);
+    const parsed = JSON.parse(stored);
+
+    let encryptedConfig: ApiKeyConfig;
+    let expiresAt: number | undefined;
+
+    if (parsed.version === 2) {
+      const metadata = parsed as ApiKeyConfigWithMetadata;
+      encryptedConfig = metadata.config;
+      expiresAt = metadata.expiresAt;
+
+      if (expiresAt && Date.now() > expiresAt) {
+        console.warn("API key configuration has expired");
+        clearApiKeyConfig();
+        return null;
+      }
+    } else {
+      encryptedConfig = parsed as ApiKeyConfig;
+    }
 
     return {
       type: encryptedConfig.type,
-      gatewayKey: encryptedConfig.gatewayKey
-        ? decryptKey(encryptedConfig.gatewayKey)
-        : undefined,
-      providerKeys: encryptedConfig.providerKeys
-        ? {
-            openai: encryptedConfig.providerKeys.openai
-              ? decryptKey(encryptedConfig.providerKeys.openai)
-              : undefined,
-            anthropic: encryptedConfig.providerKeys.anthropic
-              ? decryptKey(encryptedConfig.providerKeys.anthropic)
-              : undefined,
-            xai: encryptedConfig.providerKeys.xai
-              ? decryptKey(encryptedConfig.providerKeys.xai)
-              : undefined,
-            google: encryptedConfig.providerKeys.google
-              ? decryptKey(encryptedConfig.providerKeys.google)
-              : undefined,
-            mistral: encryptedConfig.providerKeys.mistral
-              ? decryptKey(encryptedConfig.providerKeys.mistral)
-              : undefined,
-            deepseek: encryptedConfig.providerKeys.deepseek
-              ? decryptKey(encryptedConfig.providerKeys.deepseek)
-              : undefined,
-            groq: encryptedConfig.providerKeys.groq
-              ? decryptKey(encryptedConfig.providerKeys.groq)
-              : undefined,
-          }
-        : undefined,
+      ...(encryptedConfig.type === "oidc"
+        ? {}
+        : encryptedConfig.type === "gateway"
+          ? {
+              gatewayKey: encryptedConfig.gatewayKey
+                ? await decryptKey(encryptedConfig.gatewayKey)
+                : undefined,
+            }
+          : {
+              providerKeys: encryptedConfig.providerKeys
+                ? {
+                    openai: encryptedConfig.providerKeys.openai
+                      ? await decryptKey(encryptedConfig.providerKeys.openai)
+                      : undefined,
+                    anthropic: encryptedConfig.providerKeys.anthropic
+                      ? await decryptKey(encryptedConfig.providerKeys.anthropic)
+                      : undefined,
+                    xai: encryptedConfig.providerKeys.xai
+                      ? await decryptKey(encryptedConfig.providerKeys.xai)
+                      : undefined,
+                    google: encryptedConfig.providerKeys.google
+                      ? await decryptKey(encryptedConfig.providerKeys.google)
+                      : undefined,
+                    mistral: encryptedConfig.providerKeys.mistral
+                      ? await decryptKey(encryptedConfig.providerKeys.mistral)
+                      : undefined,
+                    deepseek: encryptedConfig.providerKeys.deepseek
+                      ? await decryptKey(encryptedConfig.providerKeys.deepseek)
+                      : undefined,
+                    groq: encryptedConfig.providerKeys.groq
+                      ? await decryptKey(encryptedConfig.providerKeys.groq)
+                      : undefined,
+                  }
+                : undefined,
+            }),
     };
   } catch (error) {
-    console.error("[v0] Failed to load API key config:", error);
+    console.error("Failed to load API key config:", error);
     return null;
   }
 }
@@ -173,19 +201,23 @@ export function loadApiKeyConfig(): ApiKeyConfig | null {
  * Get the primary API key (gateway key or first provider key)
  * Returns the key that should be used for API requests
  *
- * @returns The primary API key string, or null if no key is configured
+ * @returns Promise resolving to the primary API key string, or null if no key is configured
  *
  * @example
  * ```tsx
- * const apiKey = getPrimaryApiKey()
+ * const apiKey = await getPrimaryApiKey()
  * if (apiKey) {
  *   // Use the key for API requests
  * }
  * ```
  */
-export function getPrimaryApiKey(): string | null {
-  const config = loadApiKeyConfig();
+export async function getPrimaryApiKey(): Promise<string | null> {
+  const config = await loadApiKeyConfig();
   if (!config) return null;
+
+  if (config.type === "oidc") {
+    return null;
+  }
 
   if (config.type === "gateway" && config.gatewayKey) {
     return config.gatewayKey;
@@ -216,7 +248,7 @@ export function clearApiKeyConfig(): void {
   try {
     localStorage.removeItem(STORAGE_KEYS.API_KEY_CONFIG);
   } catch (error) {
-    console.error("[v0] Failed to clear API key config:", error);
+    console.error("Failed to clear API key config:", error);
   }
 }
 
@@ -224,7 +256,6 @@ export function clearApiKeyConfig(): void {
  * Default app settings used when no saved settings exist
  */
 const DEFAULT_SETTINGS: AppSettings = {
-  theme: "dark",
   lastSelectedModels: [],
   gamesPlayed: 0,
   totalRaceTime: 0,
@@ -240,7 +271,7 @@ const DEFAULT_SETTINGS: AppSettings = {
  * @example
  * ```tsx
  * const settings = loadSettings()
- * console.log(settings.theme) // "dark" or "light"
+ * console.log(settings.debugMode) // true or false
  * ```
  */
 export function loadSettings(): AppSettings {
@@ -250,7 +281,7 @@ export function loadSettings(): AppSettings {
     if (!stored) return DEFAULT_SETTINGS;
     return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
   } catch (error) {
-    console.error("[v0] Failed to load settings:", error);
+    console.error("Failed to load settings:", error);
     return DEFAULT_SETTINGS;
   }
 }
@@ -263,7 +294,7 @@ export function loadSettings(): AppSettings {
  *
  * @example
  * ```tsx
- * saveSettings({ theme: "light", debugMode: true })
+ * saveSettings({ debugMode: true })
  * ```
  */
 export function saveSettings(settings: Partial<AppSettings>): void {
@@ -273,7 +304,7 @@ export function saveSettings(settings: Partial<AppSettings>): void {
     const updated = { ...current, ...settings };
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
   } catch (error) {
-    console.error("[v0] Failed to save settings:", error);
+    console.error("Failed to save settings:", error);
   }
 }
 

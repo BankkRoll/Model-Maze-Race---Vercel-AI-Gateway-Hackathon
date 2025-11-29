@@ -7,10 +7,9 @@
  * @module RunningStage
  */
 
-import { DebugPanel } from "@/components/debug-panel";
-import { MazeGridComponent } from "@/components/maze-grid";
-import { RaceHUD } from "@/components/race-hud";
-import { Button } from "@/components/ui/button";
+import { DebugPanel } from "@/components/game/debug-panel";
+import { MazeGridComponent } from "@/components/game/maze-grid";
+import { RaceHUD } from "@/components/game/race-hud";
 import type {
   AIChatMessage,
   AIStatus,
@@ -19,7 +18,6 @@ import type {
   ModelState,
   Position,
 } from "@/types";
-import { Pause, Play, Square } from "lucide-react";
 import { motion } from "motion/react";
 
 /**
@@ -62,6 +60,8 @@ interface RunningStageProps {
   onStopRace: () => void;
   /** Callback when race is reset */
   onReset: () => void;
+  /** Callback to regenerate the maze with current config */
+  onRegenerateMaze: () => void;
 }
 
 /**
@@ -91,6 +91,7 @@ interface RunningStageProps {
  *   onResumeRace={() => resumeRace()}
  *   onStopRace={() => stopRace()}
  *   onReset={() => resetRace()}
+ *   onRegenerateMaze={() => createNewMaze(mazeConfig)}
  * />
  * ```
  */
@@ -112,6 +113,7 @@ export function RunningStage({
   onResumeRace,
   onStopRace,
   onReset,
+  onRegenerateMaze,
 }: RunningStageProps) {
   return (
     <motion.div
@@ -119,50 +121,6 @@ export function RunningStage({
       animate={{ opacity: 1 }}
       className="space-y-6 py-6"
     >
-      <div className="flex items-center justify-center gap-4">
-        {!isRunning ? (
-          <Button
-            size="lg"
-            onClick={onStartRace}
-            disabled={models.length === 0}
-            className="min-w-[140px]"
-          >
-            <Play className="w-5 h-5 mr-2" />
-            Start Race
-          </Button>
-        ) : isPaused ? (
-          <Button size="lg" onClick={onResumeRace} className="min-w-[140px]">
-            <Play className="w-5 h-5 mr-2" />
-            Resume
-          </Button>
-        ) : (
-          <Button size="lg" onClick={onPauseRace} className="min-w-[140px]">
-            <Pause className="w-5 h-5 mr-2" />
-            Pause
-          </Button>
-        )}
-
-        <Button
-          size="lg"
-          variant="outline"
-          onClick={onStopRace}
-          disabled={!isRunning}
-          className="min-w-[140px] bg-transparent"
-        >
-          <Square className="w-5 h-5 mr-2" />
-          Stop
-        </Button>
-
-        <Button
-          size="lg"
-          variant="destructive"
-          onClick={onReset}
-          className="min-w-[140px]"
-        >
-          Reset
-        </Button>
-      </div>
-
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           {maze && exitPos && startPos && (
@@ -184,6 +142,14 @@ export function RunningStage({
             maxTurns={maxTurns}
             chatMessages={chatMessages}
             modelStatuses={modelStatuses}
+            isRunning={isRunning}
+            isPaused={isPaused}
+            onStartRace={onStartRace}
+            onPauseRace={onPauseRace}
+            onResumeRace={onResumeRace}
+            onStopRace={onStopRace}
+            onReset={onReset}
+            onRegenerateMaze={onRegenerateMaze}
           />
         </div>
       </div>

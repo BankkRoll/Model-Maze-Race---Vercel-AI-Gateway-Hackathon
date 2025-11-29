@@ -99,6 +99,8 @@ export interface ModelConfig {
   color: string;
   /** Model string identifier (e.g., "openai/gpt-4o-mini") */
   modelString: string;
+  /** Model capabilities */
+  capabilities?: ModelCapabilities;
 }
 
 /**
@@ -184,13 +186,17 @@ export interface RaceStats {
 }
 
 /**
- * API Key configuration - supports both gateway and provider-specific keys
+ * API Key configuration - supports OIDC, gateway API key, and provider-specific keys
  *
  * @interface ApiKeyConfig
  */
 export interface ApiKeyConfig {
-  /** Type of key configuration */
-  type: "gateway" | "provider";
+  /** Type of authentication method */
+  type: "oidc" | "gateway" | "provider";
+  /** OIDC access token (for Vercel Sign In) */
+  oidcToken?: string;
+  /** OIDC refresh token (for token refresh) */
+  oidcRefreshToken?: string;
   /** Gateway API key (for unified gateway access) */
   gatewayKey?: string;
   /** Provider-specific API keys */
@@ -213,8 +219,6 @@ export interface ApiKeyConfig {
 export interface AppSettings {
   /** API key configuration (optional) */
   apiKeyConfig?: ApiKeyConfig;
-  /** UI theme preference */
-  theme: "light" | "dark";
   /** Array of last selected model IDs */
   lastSelectedModels: string[];
   /** Total number of games played */
@@ -243,6 +247,14 @@ export interface DebugInfo {
   visibleArea: VisibleArea;
   /** Timestamp of the turn */
   timestamp: number;
+  /** Current position of the model */
+  position: Position;
+  /** Full path taken by the model so far */
+  pathTaken: Position[];
+  /** All valid moves available from current position */
+  validMoves: Direction[];
+  /** Unexplored directions from current position */
+  unexploredDirections: Direction[];
 }
 
 /**
@@ -266,8 +278,34 @@ export interface AIChatMessage {
   prompt?: string;
   /** Optional response text */
   response?: string;
+  /** Optional reasoning text (for models that support reasoning) */
+  reasoning?: string;
   /** Step number when this message was generated */
   stepNumber: number;
+}
+
+/**
+ * Model capabilities from AI Gateway
+ *
+ * @interface ModelCapabilities
+ */
+export interface ModelCapabilities {
+  /** Whether the model supports reasoning/thinking outputs */
+  reasoning?: boolean;
+}
+
+/**
+ * Model specification from AI Gateway
+ *
+ * @interface ModelSpecification
+ */
+export interface ModelSpecification {
+  /** Specification version */
+  specificationVersion?: string;
+  /** Provider name (e.g., "openai", "anthropic") */
+  provider?: string;
+  /** Model ID from provider */
+  modelId?: string;
 }
 
 /**
@@ -288,5 +326,15 @@ export interface AvailableModel {
     input: number;
     /** Price per output token */
     output: number;
+    /** Price per cached input token (if supported) */
+    cachedInputTokens?: number;
+    /** Price per cache creation input token (if supported) */
+    cacheCreationInputTokens?: number;
   };
+  /** Model specification details */
+  specification?: ModelSpecification;
+  /** Model type */
+  modelType?: "language" | "embedding" | "image";
+  /** Model capabilities */
+  capabilities?: ModelCapabilities;
 }

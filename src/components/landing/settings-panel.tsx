@@ -3,6 +3,8 @@
 /**
  * Settings panel for configuring race parameters
  * Settings apply instantly without needing an "Apply" button
+ *
+ * @module SettingsPanel
  */
 
 import { Card } from "@/components/ui/card";

@@ -22,10 +22,6 @@ interface HeaderProps {
   theme: "light" | "dark";
   /** Whether debug mode is enabled */
   debugMode: boolean;
-  /** Whether to show the full maze toggle (only during race) */
-  showFullMazeToggle?: boolean;
-  /** Whether the full maze is currently shown */
-  showFullMaze?: boolean;
   /** Whether an API key is configured */
   hasApiKey: boolean;
   /** Callback when theme is toggled */
@@ -60,8 +56,6 @@ interface HeaderProps {
 export function Header({
   theme,
   debugMode,
-  showFullMazeToggle = false,
-  showFullMaze = true,
   hasApiKey,
   onThemeToggle,
   onDebugToggle,
@@ -90,17 +84,6 @@ export function Header({
               />
               <Label className="sr-only">Debug Mode</Label>
             </div>
-
-            {showFullMazeToggle && (
-              <div className="flex items-center gap-1">
-                <Switch
-                  checked={showFullMaze}
-                  onCheckedChange={onFullMazeToggle}
-                  className="scale-90 sm:scale-100"
-                />
-                <Label className="sr-only">Show Full Maze</Label>
-              </div>
-            )}
 
             <Button
               variant="outline"

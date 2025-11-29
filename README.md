@@ -77,8 +77,11 @@ Setup → Generate Maze → Initialize Models → Start Race
 
 ### AI Integration
 
-- Uses **Vercel AI SDK** with **AI Gateway** to access 200+ models
-- Supports both gateway API keys and provider-specific keys
+- Uses **Vercel AI SDK** with **AI Gateway** to access 150+ models
+- Supports three authentication methods:
+  - **Vercel Auth (OIDC)** - Sign in with Vercel to use account credits automatically
+  - **Gateway API Key** - Manual API key for AI Gateway
+  - **Provider Keys** - Direct provider API keys (OpenAI, Anthropic, xAI, Google, Mistral, DeepSeek, Groq)
 - Models receive structured prompts with their visible maze area
 - Responses are parsed to extract directional moves
 - Real-time status updates show "thinking" → "responding" → "complete"
@@ -107,10 +110,25 @@ Setup → Generate Maze → Initialize Models → Start Race
    npm install
    ```
 
-2. **Set up API keys**
-   - Add your AI Gateway API key or provider-specific keys
-   - Keys are encrypted and stored locally in localStorage
-   - Access via the "Add Key" button in the UI
+2. **Set up authentication** (choose one method)
+
+   **Option 1: Vercel Auth (OIDC)** - Recommended
+   ```bash
+   # Add to .env.local (optional)
+   NEXT_PUBLIC_VERCEL_APP_CLIENT_ID=your-client-id
+   VERCEL_APP_CLIENT_SECRET=your-client-secret
+   ```
+   Get credentials from [Vercel Dashboard](https://vercel.com/dashboard) → Team Settings → Apps → Create App
+
+   **Option 2: Gateway API Key**
+   - Get your AI Gateway API key from Vercel dashboard
+   - Enter it in the app's authentication modal
+
+   **Option 3: Provider Keys**
+   - Get API keys from individual providers (OpenAI, Anthropic, etc.)
+   - Enter them in the app's authentication modal
+
+   All keys are encrypted and stored locally in localStorage.
 
 3. **Run development server**
    ```bash
@@ -129,7 +147,10 @@ Setup → Generate Maze → Initialize Models → Start Race
 
 ```
 src/
-├── app/                    # Next.js pages (layout, main page)
+├── app/                    # Next.js App Router
+│   ├── api/auth/           # OAuth routes (authorize, callback, refresh, signout)
+│   ├── layout.tsx          # Root layout
+│   └── page.tsx            # Main application page
 ├── components/             # React components
 │   ├── maze-grid.tsx       # Visual maze renderer
 │   ├── race-hud.tsx        # Race status & live AI chat
@@ -139,7 +160,7 @@ src/
 │   ├── settings-panel.tsx  # Maze configuration panel
 │   ├── hero-demo.tsx       # Hero section demo simulation
 │   ├── header.tsx          # App header with controls
-│   ├── api-key-modal.tsx    # API key configuration modal
+│   ├── api-key-modal.tsx   # Authentication setup modal
 │   ├── debug-panel.tsx     # Debug logs display
 │   ├── ai-chat-panel.tsx   # Live AI chat panel
 │   └── ui/                 # shadcn/ui components
@@ -151,6 +172,7 @@ src/
 │   ├── maze.ts             # Maze generation & utilities
 │   ├── ai.ts               # AI Gateway integration
 │   ├── storage.ts          # localStorage utilities
+│   ├── oidc.ts             # OIDC authentication utilities
 │   └── utils.ts            # Utility functions
 ├── context/                # React Context providers
 │   └── api-key-context.tsx # API key management context
@@ -169,7 +191,14 @@ src/
 
 ### Environment Setup
 
-No environment variables required. API keys are managed through the UI and stored client-side only.
+**Optional** - For OIDC authentication (Sign in with Vercel):
+
+```bash
+NEXT_PUBLIC_VERCEL_APP_CLIENT_ID=your-client-id
+VERCEL_APP_CLIENT_SECRET=your-client-secret
+```
+
+If not set, use Gateway API Key or Provider Keys instead. All keys are managed through the UI and stored client-side only.
 
 ---
 
