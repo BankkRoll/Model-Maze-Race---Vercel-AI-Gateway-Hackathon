@@ -59,6 +59,7 @@ export function useHeroSimulation({
   const mazeRef = useRef(demoMaze);
   const startPosRef = useRef(startPos);
   const exitPosRef = useRef(exitPos);
+  const isProcessingMoveRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -79,14 +80,18 @@ export function useHeroSimulation({
     if (initialModels.length > 0) {
       modelsRef.current = initialModels;
       setModels(initialModels);
-      // Reset processing state when new models arrive (e.g., after regenerate)
       setIsProcessingMove(false);
+      isProcessingMoveRef.current = false;
     }
   }, [initialModels]);
 
   useEffect(() => {
     modelsRef.current = models;
   }, [models]);
+
+  useEffect(() => {
+    isProcessingMoveRef.current = isProcessingMove;
+  }, [isProcessingMove]);
 
   useEffect(() => {
     if (
@@ -101,9 +106,10 @@ export function useHeroSimulation({
     const processNextStep = () => {
       if (!isMountedRef.current) return;
 
-      if (isProcessingMove) return;
+      if (isProcessingMoveRef.current) return;
 
       setIsProcessingMove(true);
+      isProcessingMoveRef.current = true;
 
       const currentModels = modelsRef.current;
       const activeModels = currentModels.filter(
@@ -117,6 +123,7 @@ export function useHeroSimulation({
           const currentStartPos = startPosRef.current;
           if (!currentStartPos) {
             setIsProcessingMove(false);
+            isProcessingMoveRef.current = false;
             return;
           }
           setModels((prev) =>
@@ -144,6 +151,7 @@ export function useHeroSimulation({
         }, 2000);
         timeoutRefs.current.add(timeout);
         setIsProcessingMove(false);
+        isProcessingMoveRef.current = false;
         return;
       }
 
@@ -162,6 +170,7 @@ export function useHeroSimulation({
           }),
         );
         setIsProcessingMove(false);
+        isProcessingMoveRef.current = false;
         return;
       }
 
@@ -195,6 +204,7 @@ export function useHeroSimulation({
               const currentExitPos = exitPosRef.current;
               if (!currentMaze || !currentExitPos) {
                 setIsProcessingMove(false);
+                isProcessingMoveRef.current = false;
                 return;
               }
 
@@ -258,19 +268,24 @@ export function useHeroSimulation({
                     newPos.x === currentExitPos.x &&
                     newPos.y === currentExitPos.y;
 
+                  const limitedPathTaken = [...model.pathTaken, newPos].slice(
+                    -200,
+                  );
+                  const limitedMoveHistory = [
+                    ...model.moveHistory,
+                    {
+                      direction: finalDirection,
+                      position: newPos,
+                      timestamp,
+                      success: isValidMove(currentMaze, newPos),
+                    },
+                  ].slice(-200);
+
                   return {
                     ...model,
                     position: newPos,
-                    pathTaken: [...model.pathTaken, newPos],
-                    moveHistory: [
-                      ...model.moveHistory,
-                      {
-                        direction: finalDirection,
-                        position: newPos,
-                        timestamp,
-                        success: isValidMove(currentMaze, newPos),
-                      },
-                    ],
+                    pathTaken: limitedPathTaken,
+                    moveHistory: limitedMoveHistory,
                     stepCount: stepNumber,
                     totalTime: model.totalTime + moveTime,
                     lastMoveTime: moveTime,
@@ -302,7 +317,7 @@ export function useHeroSimulation({
                 return updatedModels;
               });
 
-              setChatMessages((prev) => [...prev.slice(-30), ...newMessages]);
+              setChatMessages((prev) => [...prev.slice(-50), ...newMessages]);
 
               setModelStatuses((prev) => {
                 const newStatuses = { ...prev };
@@ -313,6 +328,7 @@ export function useHeroSimulation({
               });
 
               setIsProcessingMove(false);
+              isProcessingMoveRef.current = false;
             },
             250 + Math.random() * 150,
           );
@@ -334,6 +350,17 @@ export function useHeroSimulation({
       }
       return prev;
     });
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+    timeoutRefs.current.clear();
+
+    setIsProcessingMove(false);
+    isProcessingMoveRef.current = false;
 
     intervalRef.current = setInterval(processNextStep, 800);
 
@@ -359,8 +386,8 @@ export function useHeroSimulation({
     timeoutRefs.current.clear();
 
     setIsProcessingMove(false);
+    isProcessingMoveRef.current = false;
 
-    // Use current models from ref if initialModels is empty (during regeneration)
     const modelsToReset =
       initialModels.length > 0 ? initialModels : modelsRef.current;
 

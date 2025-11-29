@@ -5,6 +5,7 @@
  */
 
 import { findAllPaths, generateMaze } from "@/lib/maze";
+import { getHeroPathfindingConfig } from "@/lib/pathfinding-config";
 import type { MazeGrid, ModelConfig, ModelState, Position } from "@/types";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -34,7 +35,17 @@ export function useHeroMaze(debugMode: boolean): UseHeroMazeResult {
   const allPaths = useMemo(() => {
     if (!debugMode || !demoMaze || !startPos || !exitPos) return [];
     try {
-      return findAllPaths(demoMaze, startPos, exitPos, 30, undefined, 2, 0.85);
+      const config = getHeroPathfindingConfig();
+      return findAllPaths(
+        demoMaze,
+        startPos,
+        exitPos,
+        config.maxPaths,
+        config.maxPathLength,
+        config.maxRevisits,
+        config.similarityThreshold,
+        config.maxPathsToTry,
+      );
     } catch {
       return [];
     }
@@ -51,108 +62,167 @@ export function useHeroMaze(debugMode: boolean): UseHeroMazeResult {
     return cells;
   }, [debugMode, allPaths]);
 
-  const generateMazeData = () => {
-    const MAX_RETRIES = 10;
-    let maze: MazeGrid | null = null;
-    let edgeStart: Position | null = null;
-    let edgeExit: Position | null = null;
-    let attempts = 0;
+  /**
+   * Find a path from start to exit using BFS (cardinal directions only)
+   * Returns the path as an array of positions, or null if no path exists
+   */
+  const findPathBFS = (
+    maze: MazeGrid,
+    start: Position,
+    exit: Position,
+  ): Position[] | null => {
+    const queue: { pos: Position; path: Position[] }[] = [
+      { pos: start, path: [start] },
+    ];
+    const visited = new Set<string>([`${start.x},${start.y}`]);
+    const width = maze[0].length;
+    const height = maze.length;
 
-    while (attempts < MAX_RETRIES) {
-      const generated = generateMaze({
-        width: 20,
-        height: 20,
-        difficulty: "medium",
-      });
+    const cardinalDirections = [
+      { x: 0, y: -1 },
+      { x: 1, y: 0 },
+      { x: 0, y: 1 },
+      { x: -1, y: 0 },
+    ];
 
-      const width = generated.maze[0].length;
-      const height = generated.maze.length;
-      const lastRow = height - 1;
-      const lastCol = width - 1;
+    while (queue.length > 0) {
+      const current = queue.shift()!;
 
-      const start = generated.start;
-      const exit = generated.exit;
-      const tempStart: Position = { x: 0, y: 0 };
-
-      if (start.x !== tempStart.x || start.y !== tempStart.y) {
-        generated.maze[start.y][start.x] = "path";
-      }
-      generated.maze[tempStart.y][tempStart.x] = "start";
-
-      const tempExit: Position = { x: lastCol, y: lastRow };
-      if (exit.x !== tempExit.x || exit.y !== tempExit.y) {
-        generated.maze[exit.y][exit.x] = "path";
-      }
-      generated.maze[tempExit.y][tempExit.x] = "exit";
-
-      generated.maze[0][1] = "path";
-      generated.maze[1][0] = "path";
-      generated.maze[1][1] = "path";
-
-      generated.maze[lastRow][lastCol - 1] = "path";
-      generated.maze[lastRow - 1][lastCol] = "path";
-      if (lastRow > 1 && lastCol > 1) {
-        generated.maze[lastRow - 1][lastCol - 1] = "path";
+      if (current.pos.x === exit.x && current.pos.y === exit.y) {
+        return current.path;
       }
 
-      let nearestPathX = lastCol - 1;
-      let nearestPathY = lastRow - 1;
-      let foundPath = false;
+      for (const dir of cardinalDirections) {
+        const next: Position = {
+          x: current.pos.x + dir.x,
+          y: current.pos.y + dir.y,
+        };
 
-      for (let radius = 1; radius <= 3 && !foundPath; radius++) {
-        for (let dy = -radius; dy <= radius; dy++) {
-          for (let dx = -radius; dx <= radius; dx++) {
-            const checkX = lastCol + dx;
-            const checkY = lastRow + dy;
-            if (
-              checkX >= 0 &&
-              checkX < width &&
-              checkY >= 0 &&
-              checkY < height &&
-              (generated.maze[checkY]?.[checkX] === "path" ||
-                generated.maze[checkY]?.[checkX] === "start")
-            ) {
-              nearestPathX = checkX;
-              nearestPathY = checkY;
-              foundPath = true;
-              break;
-            }
-          }
-          if (foundPath) break;
+        const key = `${next.x},${next.y}`;
+
+        if (
+          next.x >= 0 &&
+          next.x < width &&
+          next.y >= 0 &&
+          next.y < height &&
+          !visited.has(key) &&
+          (maze[next.y][next.x] === "path" ||
+            maze[next.y][next.x] === "start" ||
+            maze[next.y][next.x] === "exit")
+        ) {
+          visited.add(key);
+          queue.push({
+            pos: next,
+            path: [...current.path, next],
+          });
         }
-      }
-
-      let currentX = nearestPathX;
-      let currentY = nearestPathY;
-
-      while (currentX !== lastCol || currentY !== lastRow) {
-        if (currentX < lastCol) {
-          currentX++;
-        } else if (currentY < lastRow) {
-          currentY++;
-        }
-        if (currentX !== lastCol || currentY !== lastRow) {
-          generated.maze[currentY][currentX] = "path";
-        }
-      }
-
-      const pathExists = findAllPaths(generated.maze, tempStart, tempExit, 1);
-      if (pathExists.length > 0) {
-        maze = generated.maze;
-        edgeStart = tempStart;
-        edgeExit = tempExit;
-        break;
-      }
-
-      attempts++;
-      if (attempts >= MAX_RETRIES) {
-        maze = generated.maze;
-        edgeStart = tempStart;
-        edgeExit = tempExit;
       }
     }
 
-    if (!maze || !edgeStart || !edgeExit) {
+    return null;
+  };
+
+  /**
+   * Carve a path into the maze, ensuring only cardinal directions and 1-cell width
+   */
+  const carvePath = (maze: MazeGrid, path: Position[]): void => {
+    for (const pos of path) {
+      if (maze[pos.y][pos.x] !== "start" && maze[pos.y][pos.x] !== "exit") {
+        maze[pos.y][pos.x] = "path";
+      }
+    }
+  };
+
+  const generateMazeData = () => {
+    const width = 20;
+    const height = 20;
+    const edgeStart: Position = { x: 0, y: 0 };
+    const edgeExit: Position = { x: width - 1, y: height - 1 };
+
+    let maze: MazeGrid | null = null;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10;
+
+    while (attempts < MAX_ATTEMPTS && !maze) {
+      const generated = generateMaze({
+        width,
+        height,
+        difficulty: "medium",
+      });
+
+      const workingMaze = generated.maze.map((row) => [...row]);
+
+      workingMaze[edgeStart.y][edgeStart.x] = "start";
+      workingMaze[edgeExit.y][edgeExit.x] = "exit";
+
+      workingMaze[0][1] = "path";
+      workingMaze[1][0] = "path";
+      workingMaze[1][1] = "path";
+
+      workingMaze[height - 1][width - 2] = "path";
+      workingMaze[height - 2][width - 1] = "path";
+
+      const path = findPathBFS(workingMaze, edgeStart, edgeExit);
+
+      if (path && path.length > 0) {
+        carvePath(workingMaze, path);
+
+        const validationPath = findPathBFS(workingMaze, edgeStart, edgeExit);
+        if (validationPath && validationPath.length > 0) {
+          const pathExists = findAllPaths(
+            workingMaze,
+            edgeStart,
+            edgeExit,
+            1,
+            undefined,
+            1,
+            0.95,
+            500,
+          );
+          if (pathExists.length > 0) {
+            maze = workingMaze;
+            break;
+          }
+        }
+      }
+
+      attempts++;
+    }
+
+    if (!maze) {
+      const fallback = generateMaze({
+        width,
+        height,
+        difficulty: "easy",
+      });
+      maze = fallback.maze.map((row) => [...row]);
+
+      maze[edgeStart.y][edgeStart.x] = "start";
+      maze[edgeExit.y][edgeExit.x] = "exit";
+
+      maze[0][1] = "path";
+      maze[1][0] = "path";
+      maze[1][1] = "path";
+
+      maze[height - 1][width - 2] = "path";
+      maze[height - 2][width - 1] = "path";
+
+      const fallbackPath = findPathBFS(maze, edgeStart, edgeExit);
+      if (fallbackPath && fallbackPath.length > 0) {
+        carvePath(maze, fallbackPath);
+      } else {
+        const simplePath: Position[] = [];
+        for (let x = 0; x < width; x++) {
+          simplePath.push({ x, y: 0 });
+        }
+        for (let y = 1; y < height; y++) {
+          simplePath.push({ x: width - 1, y });
+        }
+        carvePath(maze, simplePath);
+      }
+    }
+
+    if (!maze) {
       return;
     }
 

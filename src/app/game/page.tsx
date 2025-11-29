@@ -22,7 +22,7 @@ import {
 import type { MazeConfig, MazeGrid, ModelConfig, Position } from "@/types";
 import { useTheme } from "next-themes";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function GamePage() {
   const router = useRouter();
@@ -34,7 +34,6 @@ export default function GamePage() {
   } = useApiKey();
   const [showApiModal, setShowApiModal] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
-  const [showFullMaze, setShowFullMaze] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { theme, setTheme } = useTheme();
 
@@ -87,6 +86,40 @@ export default function GamePage() {
   }, [router, initializeModels, setTheme]);
 
   useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "settings") {
+        try {
+          const newSettings = JSON.parse(e.newValue || "{}");
+          if (typeof newSettings.debugMode === "boolean") {
+            setDebugMode(newSettings.debugMode);
+          }
+        } catch {}
+      }
+    };
+
+    const handleCustomStorageChange = () => {
+      const settings = loadSettings();
+      setDebugMode(settings.debugMode);
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("settingsChanged", handleCustomStorageChange);
+
+    const interval = setInterval(() => {
+      const settings = loadSettings();
+      if (settings.debugMode !== debugMode) {
+        setDebugMode(settings.debugMode);
+      }
+    }, 100);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("settingsChanged", handleCustomStorageChange);
+      clearInterval(interval);
+    };
+  }, [debugMode]);
+
+  useEffect(() => {
     if (!apiKeyLoading) {
       if (!keyConfig || (keyConfig.type !== "oidc" && !primaryKey)) {
         setShowApiModal(true);
@@ -127,8 +160,15 @@ export default function GamePage() {
     router.push("/");
   };
 
+  const regenerateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleRegenerateMaze = async () => {
     if (!gameConfig) return;
+
+    if (regenerateTimeoutRef.current) {
+      clearTimeout(regenerateTimeoutRef.current);
+      regenerateTimeoutRef.current = null;
+    }
 
     stopRace();
 
@@ -146,7 +186,8 @@ export default function GamePage() {
 
     initializeModels(updatedConfig.selectedModels, start);
 
-    setTimeout(async () => {
+    regenerateTimeoutRef.current = setTimeout(async () => {
+      regenerateTimeoutRef.current = null;
       if (updatedConfig.maze && updatedConfig.exitPos) {
         const startTime = Date.now();
         await startRace(updatedConfig.maze, updatedConfig.exitPos);
@@ -157,21 +198,23 @@ export default function GamePage() {
     }, 100);
   };
 
+  useEffect(() => {
+    return () => {
+      if (regenerateTimeoutRef.current) {
+        clearTimeout(regenerateTimeoutRef.current);
+        regenerateTimeoutRef.current = null;
+      }
+      stopRace();
+    };
+  }, [stopRace]);
+
   if (!gameConfig) {
     return null;
   }
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <Header
-        theme={(theme as "light" | "dark") || "dark"}
-        debugMode={debugMode}
-        hasApiKey={!!keyConfig && (keyConfig.type === "oidc" || !!primaryKey)}
-        onThemeToggle={toggleTheme}
-        onDebugToggle={toggleDebugMode}
-        onFullMazeToggle={setShowFullMaze}
-        onApiKeyClick={() => setShowApiModal(true)}
-      />
+      <Header />
 
       {error && (
         <div className="container mx-auto px-4 pt-4">
@@ -187,7 +230,6 @@ export default function GamePage() {
           models={models}
           exitPos={gameConfig.exitPos}
           startPos={gameConfig.startPos}
-          showFullMaze={showFullMaze}
           debugMode={debugMode}
           isRunning={isRunning}
           isPaused={isPaused}
@@ -195,6 +237,7 @@ export default function GamePage() {
           chatMessages={chatMessages}
           modelStatuses={modelStatuses}
           maxTurns={500}
+          mazeConfig={gameConfig.mazeConfig}
           onStartRace={handleStartRace}
           onPauseRace={pauseRace}
           onResumeRace={resumeRace}

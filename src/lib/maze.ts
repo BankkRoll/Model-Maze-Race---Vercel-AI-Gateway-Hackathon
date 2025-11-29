@@ -396,11 +396,17 @@ function isPathSignificantlyDifferent(
 
     if (avgLength > 0 && lengthDiff / avgLength < 0.15) {
       const existingPathSet = new Set(existingPath.map((p) => `${p.x},${p.y}`));
+
+      if (newPathSet.size === 0 || existingPathSet.size === 0) continue;
+
+      const minSize = Math.min(newPathSet.size, existingPathSet.size);
       let intersection = 0;
 
       for (const key of newPathSet) {
         if (existingPathSet.has(key)) intersection++;
       }
+
+      if (intersection === 0) continue;
 
       const union = newPathSet.size + existingPathSet.size - intersection;
       const similarity = union === 0 ? 0 : intersection / union;
@@ -424,6 +430,7 @@ function isPathSignificantlyDifferent(
  * @param maxPathLength - Maximum path length to consider
  * @param maxRevisits - Maximum times a cell can be revisited (default: 2)
  * @param similarityThreshold - Maximum similarity threshold (default: 0.85)
+ * @param maxPathsToTry - Maximum path attempts before stopping (default: 5000)
  * @returns Array of significantly different paths, sorted by length
  */
 export function findAllPaths(
@@ -434,6 +441,7 @@ export function findAllPaths(
   maxPathLength?: number,
   maxRevisits: number = 2,
   similarityThreshold: number = 0.85,
+  maxPathsToTry: number = 5000,
 ): Position[][] {
   const allPaths: Position[][] = [];
   const width = maze[0]?.length || 0;
@@ -441,7 +449,7 @@ export function findAllPaths(
   const defaultMaxLength = maxPathLength || Math.min(width * height * 2, 1000);
   const exactPathSet = new Set<string>();
   let pathsTried = 0;
-  const MAX_PATHS_TO_TRY = 5000;
+  const MAX_PATHS_TO_TRY = maxPathsToTry;
 
   function dfs(
     current: Position,

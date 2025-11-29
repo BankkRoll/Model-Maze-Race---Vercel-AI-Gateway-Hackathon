@@ -152,7 +152,30 @@ IMPORTANT:
 - Move towards the exit (E) when you can see it
 - Explore systematically to avoid getting stuck
 
-Respond with ONLY ONE WORD - the direction you want to move: up, down, left, or right.`;
+═══════════════════════════════════════════════════════════════
+⚠️ STRICT OUTPUT REQUIREMENT - READ CAREFULLY ⚠️
+═══════════════════════════════════════════════════════════════
+
+YOUR RESPONSE MUST BE EXACTLY ONE WORD.
+
+VALID RESPONSES: up | down | left | right
+
+INVALID RESPONSES (DO NOT DO THIS):
+❌ "I think I should go up"
+❌ "up, because..."
+❌ "Direction: up"
+❌ Any response with more than one word
+❌ Any response with punctuation
+❌ Any response with capitalization
+
+OUTPUT FORMAT RULES:
+1. EXACTLY ONE WORD
+2. No reasoning in the output
+3. Just the word: up | down | left | right
+
+IF YOU INCLUDE ANYTHING OTHER THAN ONE LOWERCASE WORD, YOUR RESPONSE WILL BE REJECTED.
+
+RESPOND NOW WITH EXACTLY ONE WORD:`;
 }
 
 /**
@@ -266,7 +289,7 @@ export async function requestModelMove(
       const config = {
         model,
         prompt,
-        maxTokens: 10,
+        maxTokens: 5,
         temperature: 0.7,
       };
 

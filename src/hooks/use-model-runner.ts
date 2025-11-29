@@ -23,7 +23,7 @@ import type {
   ModelState,
   Position,
 } from "@/types";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Props for the useModelRunner hook
@@ -76,6 +76,23 @@ export function useModelRunner({
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const timeoutRefs = useRef<Set<NodeJS.Timeout>>(new Set());
+  const modelsRef = useRef<ModelState[]>([]);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      abortControllerRef.current?.abort();
+      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      timeoutRefs.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
 
   /**
    * Initialize models at the starting position
@@ -97,6 +114,7 @@ export function useModelRunner({
         pathTaken: [{ ...startPos }],
       }));
       setModels(initialModels);
+      modelsRef.current = initialModels;
       setDebugLogs([]);
       setChatMessages([]);
       const initialStatuses: Record<string, AIStatus> = {};
@@ -247,7 +265,7 @@ export function useModelRunner({
           validMoves,
           unexploredDirections,
         };
-        setDebugLogs((prev) => [...prev, debugInfo]);
+        setDebugLogs((prev) => [...prev.slice(-100), debugInfo]);
       }
 
       setModelStatuses((prev) => ({ ...prev, [modelState.config.id]: "idle" }));
@@ -264,39 +282,43 @@ export function useModelRunner({
       const newPos = calculateNewPosition(modelState.position, direction);
 
       if (!isValidMove(maze, newPos)) {
+        const limitedMoveHistory = [
+          ...modelState.moveHistory,
+          {
+            direction,
+            position: modelState.position,
+            timestamp: Date.now(),
+            success: false,
+          },
+        ].slice(-200);
+
         return {
           ...modelState,
-          moveHistory: [
-            ...modelState.moveHistory,
-            {
-              direction,
-              position: modelState.position,
-              timestamp: Date.now(),
-              success: false,
-            },
-          ],
+          moveHistory: limitedMoveHistory,
           stepCount: modelState.stepCount + 1,
           lastMoveTime: moveTime,
           totalTime: modelState.totalTime + moveTime,
         };
       }
 
-      const newPathTaken = [...modelState.pathTaken, newPos];
+      const newPathTaken = [...modelState.pathTaken, newPos].slice(-200);
 
       const reachedExit = newPos.x === exitPos.x && newPos.y === exitPos.y;
+
+      const limitedMoveHistory = [
+        ...modelState.moveHistory,
+        {
+          direction,
+          position: newPos,
+          timestamp: Date.now(),
+          success: true,
+        },
+      ].slice(-200);
 
       return {
         ...modelState,
         position: newPos,
-        moveHistory: [
-          ...modelState.moveHistory,
-          {
-            direction,
-            position: newPos,
-            timestamp: Date.now(),
-            success: true,
-          },
-        ],
+        moveHistory: limitedMoveHistory,
         stepCount: modelState.stepCount + 1,
         status: reachedExit ? "finished" : "racing",
         lastMoveTime: moveTime,
@@ -320,25 +342,39 @@ export function useModelRunner({
       setIsPaused(false);
       abortControllerRef.current = new AbortController();
 
-      setModels((prev) =>
-        prev.map((m) => ({
+      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      timeoutRefs.current.clear();
+
+      setModels((prev) => {
+        const updated = prev.map((m) => ({
           ...m,
           status: m.status === "waiting" ? "racing" : m.status,
-        })),
-      );
+        }));
+        modelsRef.current = updated;
+        return updated;
+      });
 
-      let currentModels: ModelState[] = models.map((m) => ({
+      let currentModels: ModelState[] = modelsRef.current.map((m) => ({
         ...m,
         status: m.status === "waiting" ? ("racing" as const) : m.status,
       }));
 
       while (true) {
-        if (abortControllerRef.current?.signal.aborted) {
+        if (
+          !isMountedRef.current ||
+          abortControllerRef.current?.signal.aborted
+        ) {
           break;
         }
 
         if (isPaused) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => {
+              timeoutRefs.current.delete(timeout);
+              resolve();
+            }, 100);
+            timeoutRefs.current.add(timeout);
+          });
           continue;
         }
 
@@ -364,15 +400,24 @@ export function useModelRunner({
         );
 
         currentModels = updates;
+        modelsRef.current = updates;
         setModels(updates);
 
         const delay = 1000 / speedMultiplier;
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => {
+            timeoutRefs.current.delete(timeout);
+            resolve();
+          }, delay);
+          timeoutRefs.current.add(timeout);
+        });
       }
 
+      timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+      timeoutRefs.current.clear();
       setIsRunning(false);
     },
-    [models, maxTurns, isPaused, executeModelTurn, speedMultiplier],
+    [maxTurns, isPaused, executeModelTurn, speedMultiplier],
   );
 
   /**
@@ -397,6 +442,8 @@ export function useModelRunner({
    */
   const stopRace = useCallback(() => {
     abortControllerRef.current?.abort();
+    timeoutRefs.current.forEach((timeout) => clearTimeout(timeout));
+    timeoutRefs.current.clear();
     setIsRunning(false);
     setIsPaused(false);
   }, []);

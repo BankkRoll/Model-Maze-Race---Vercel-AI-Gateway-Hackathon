@@ -2,7 +2,7 @@
 
 /**
  * Setup stage component for race configuration
- * Displays hero section, demo, and configuration panels
+ * Manages its own state and handles race initialization
  *
  * @module SetupStage
  */
@@ -11,69 +11,115 @@ import { HeroDemo } from "@/components/landing/hero-demo";
 import { ModelSelector } from "@/components/landing/model-selector";
 import { RacePreviewCard } from "@/components/landing/race-preview-card";
 import { SettingsPanel } from "@/components/landing/settings-panel";
+import { useApiKey } from "@/context/api-key-context";
+import { useMaze } from "@/hooks/use-maze";
+import { loadSettings } from "@/lib/storage";
 import type { AvailableModel, MazeConfig, ModelConfig } from "@/types";
 import { motion } from "motion/react";
-import { useState } from "react";
-
-/**
- * Props for the SetupStage component
- *
- * @interface SetupStageProps
- */
-interface SetupStageProps {
-  /** Whether debug mode is enabled */
-  debugMode: boolean;
-  /** Whether an API key is configured */
-  hasApiKey: boolean;
-  /** Current maze configuration */
-  mazeConfig: MazeConfig;
-  /** Current speed multiplier */
-  speedMultiplier: number;
-  /** Callback when maze configuration changes */
-  onConfigChange: (config: MazeConfig) => void;
-  /** Callback when speed multiplier changes */
-  onSpeedChange: (speed: number) => void;
-  /** Callback when models are selected and race should start */
-  onModelsSelected: (models: ModelConfig[]) => void;
-  /** API key for model fetching */
-  apiKey?: string | null;
-}
+import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 /**
  * Setup stage component
  * Provides UI for configuring the maze and selecting AI models before starting a race
  *
- * @param props - SetupStage component props
  * @returns SetupStage JSX element
- *
- * @example
- * ```tsx
- * <SetupStage
- *   debugMode={false}
- *   hasApiKey={true}
- *   mazeConfig={{ width: 25, height: 25, difficulty: "medium" }}
- *   speedMultiplier={1}
- *   onConfigChange={(config) => setMazeConfig(config)}
- *   onSpeedChange={(speed) => setSpeedMultiplier(speed)}
- *   onModelsSelected={(models) => startRace(models)}
- *   apiKey="your-api-key"
- * />
- * ```
  */
-export function SetupStage({
-  debugMode,
-  hasApiKey,
-  mazeConfig,
-  speedMultiplier,
-  onConfigChange,
-  onSpeedChange,
-  onModelsSelected,
-  apiKey,
-}: SetupStageProps) {
+export function SetupStage() {
+  const router = useRouter();
+  const { keyConfig, primaryKey, setKeyConfig } = useApiKey();
+  const { createNewMaze } = useMaze();
+  const [debugMode, setDebugMode] = useState(false);
+  const [mazeConfig, setMazeConfig] = useState<MazeConfig>({
+    width: 25,
+    height: 25,
+    difficulty: "medium",
+  });
+  const [speedMultiplier, setSpeedMultiplier] = useState(1);
   const [selectedModels, setSelectedModels] = useState<AvailableModel[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const settings = loadSettings();
+    setDebugMode(settings.debugMode);
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === "settings") {
+        try {
+          const newSettings = JSON.parse(e.newValue || "{}");
+          if (typeof newSettings.debugMode === "boolean") {
+            setDebugMode(newSettings.debugMode);
+          }
+        } catch {}
+      }
+    };
+
+    const handleCustomStorageChange = () => {
+      const settings = loadSettings();
+      setDebugMode(settings.debugMode);
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("settingsChanged", handleCustomStorageChange);
+
+    const interval = setInterval(() => {
+      const settings = loadSettings();
+      if (settings.debugMode !== debugMode) {
+        setDebugMode(settings.debugMode);
+      }
+    }, 100);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("settingsChanged", handleCustomStorageChange);
+      clearInterval(interval);
+    };
+  }, [debugMode]);
+
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authSuccess = urlParams.get("auth_success");
+    const authError = urlParams.get("auth_error");
+
+    if (authSuccess) {
+      setKeyConfig({ type: "oidc" });
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (authError) {
+      setError(authError);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [setKeyConfig]);
+
+  const handleModelsSelected = (configs: ModelConfig[]) => {
+    const { maze: newMaze, start, exit } = createNewMaze(mazeConfig);
+
+    localStorage.setItem(
+      "gameConfig",
+      JSON.stringify({
+        mazeConfig,
+        speedMultiplier,
+        selectedModels: configs,
+        maze: newMaze,
+        startPos: start,
+        exitPos: exit,
+      }),
+    );
+
+    router.push("/game");
+  };
+
+  const hasApiKey = !!keyConfig && (keyConfig.type === "oidc" || !!primaryKey);
 
   return (
     <>
+      {error && (
+        <div className="container mx-auto px-4 pt-4">
+          <div className="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded-lg">
+            <p className="text-sm">Authentication Error: {error}</p>
+          </div>
+        </div>
+      )}
+
       <motion.section
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -190,8 +236,8 @@ export function SetupStage({
               </h3>
             </div>
             <SettingsPanel
-              onConfigChange={onConfigChange}
-              onSpeedChange={onSpeedChange}
+              onConfigChange={setMazeConfig}
+              onSpeedChange={setSpeedMultiplier}
               disabled={!hasApiKey}
             />
           </motion.div>
@@ -212,10 +258,10 @@ export function SetupStage({
               </h3>
             </div>
             <ModelSelector
-              onModelsSelected={onModelsSelected}
+              onModelsSelected={handleModelsSelected}
               onSelectionChange={setSelectedModels}
               disabled={!hasApiKey}
-              apiKey={apiKey}
+              apiKey={primaryKey}
             />
           </motion.div>
 
@@ -236,7 +282,7 @@ export function SetupStage({
             </div>
             <RacePreviewCard
               selectedModels={selectedModels}
-              onStart={onModelsSelected}
+              onStart={handleModelsSelected}
               disabled={!hasApiKey}
             />
           </motion.div>

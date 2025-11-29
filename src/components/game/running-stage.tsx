@@ -14,6 +14,7 @@ import type {
   AIChatMessage,
   AIStatus,
   DebugInfo,
+  MazeConfig,
   MazeGrid,
   ModelState,
   Position,
@@ -34,8 +35,6 @@ interface RunningStageProps {
   exitPos: Position | null;
   /** Start position in the maze */
   startPos: Position | null;
-  /** Whether to show the full maze */
-  showFullMaze: boolean;
   /** Whether debug mode is enabled */
   debugMode: boolean;
   /** Whether the race is currently running */
@@ -50,6 +49,8 @@ interface RunningStageProps {
   modelStatuses: Record<string, AIStatus>;
   /** Maximum number of turns */
   maxTurns: number;
+  /** Maze configuration for pathfinding */
+  mazeConfig?: MazeConfig;
   /** Callback when race is started */
   onStartRace: () => void;
   /** Callback when race is paused */
@@ -78,7 +79,6 @@ interface RunningStageProps {
  *   models={modelStates}
  *   exitPos={exitPosition}
  *   startPos={startPosition}
- *   showFullMaze={true}
  *   debugMode={false}
  *   isRunning={true}
  *   isPaused={false}
@@ -100,7 +100,6 @@ export function RunningStage({
   models,
   exitPos,
   startPos,
-  showFullMaze,
   debugMode,
   isRunning,
   isPaused,
@@ -108,6 +107,7 @@ export function RunningStage({
   chatMessages,
   modelStatuses,
   maxTurns,
+  mazeConfig,
   onStartRace,
   onPauseRace,
   onResumeRace,
@@ -129,8 +129,8 @@ export function RunningStage({
               models={models}
               exitPos={exitPos}
               startPos={startPos}
-              showFullMaze={showFullMaze}
               debugMode={debugMode}
+              mazeConfig={mazeConfig}
             />
           )}
         </div>

@@ -6,27 +6,28 @@
  */
 
 import { findAllPaths } from "@/lib/maze";
+import { getGamePathfindingConfig } from "@/lib/pathfinding-config";
 import { cn } from "@/lib/utils";
-import type { MazeGrid, ModelState, Position } from "@/types";
+import type { MazeConfig, MazeGrid, ModelState, Position } from "@/types";
 import { motion } from "motion/react";
-import { useMemo } from "react";
+import { memo, useMemo, useRef } from "react";
 
 interface MazeGridProps {
   maze: MazeGrid;
   models: ModelState[];
   exitPos: Position;
-  showFullMaze?: boolean;
   debugMode?: boolean;
   startPos?: Position;
+  mazeConfig?: MazeConfig;
 }
 
-export function MazeGridComponent({
+function MazeGridComponentInner({
   maze,
   models,
   exitPos,
-  showFullMaze = true,
   debugMode = false,
   startPos,
+  mazeConfig,
 }: MazeGridProps) {
   const height = maze.length;
   const width = maze[0]?.length || 0;
@@ -37,18 +38,38 @@ export function MazeGridComponent({
       : 800;
   const cellSize = Math.max(Math.floor(maxSize / Math.max(width, height)), 8);
 
+  const mazeRef = useRef<string>("");
+  const pathsCacheRef = useRef<Position[][]>([]);
+
   const allPaths = useMemo(() => {
     if (!debugMode || !startPos) return [];
+
+    const mazeSignature = JSON.stringify({
+      maze: maze.map((row) => row.join(",")).join("|"),
+      start: `${startPos.x},${startPos.y}`,
+      exit: `${exitPos.x},${exitPos.y}`,
+    });
+
+    if (mazeRef.current === mazeSignature && pathsCacheRef.current.length > 0) {
+      return pathsCacheRef.current;
+    }
+
     try {
+      const config = mazeConfig
+        ? getGamePathfindingConfig(mazeConfig.difficulty)
+        : getGamePathfindingConfig("medium");
       const paths = findAllPaths(
         maze,
         startPos,
         exitPos,
-        30,
-        undefined,
-        2,
-        0.85,
+        config.maxPaths,
+        config.maxPathLength,
+        config.maxRevisits,
+        config.similarityThreshold,
+        config.maxPathsToTry,
       );
+      mazeRef.current = mazeSignature;
+      pathsCacheRef.current = paths;
       return paths;
     } catch (error) {
       console.error("[Pathfinder] Error finding paths:", error);
@@ -69,22 +90,6 @@ export function MazeGridComponent({
 
   return (
     <div className="flex flex-col items-center justify-center p-4 gap-2">
-      {debugMode && allPaths.length > 0 && (
-        <div className="text-xs text-muted-foreground font-mono bg-muted/50 px-3 py-1.5 rounded-md border border-border/50">
-          <span className="font-semibold text-foreground">Unique Paths: </span>
-          {allPaths.length}
-          <span className="text-muted-foreground/70">
-            {" "}
-            (significantly different routes)
-          </span>
-          <span className="mx-2">|</span>
-          <span className="font-semibold text-foreground">Shortest: </span>
-          {allPaths[0]?.length} steps
-          <span className="mx-2">|</span>
-          <span className="font-semibold text-foreground">Longest: </span>
-          {allPaths[allPaths.length - 1]?.length} steps
-        </div>
-      )}
       <div
         className="relative rounded-lg overflow-hidden border-2 border-border shadow-2xl"
         style={{
@@ -118,7 +123,7 @@ export function MazeGridComponent({
                         : isStart
                           ? "bg-primary/20 border-primary/60"
                           : "bg-card/50 border-border/20",
-                    !showFullMaze && cell === "wall" && "opacity-30",
+                    cell === "wall" && "opacity-30",
                   )}
                 >
                   {debugMode && isReachable && cell !== "wall" && (
@@ -151,130 +156,129 @@ export function MazeGridComponent({
             className="absolute inset-0 pointer-events-none z-10"
             style={{ width: width * cellSize, height: height * cellSize }}
           >
-            {allPaths.map((path, pathIndex) => {
-              const shortestLength = allPaths[0]?.length || Infinity;
-              const pathLength = path.length;
+            {allPaths.map((path, pathIndex) => (
+              <path
+                key={`path-${pathIndex}`}
+                d={generatePathD(path, cellSize)}
+                stroke="#a855f7"
+                strokeWidth={1}
+                fill="none"
+                strokeDasharray="4 4"
+                opacity={0.6}
+              />
+            ))}
+          </svg>
+        )}
 
-              const isShortest = pathIndex === 0;
-              const isShort = pathLength <= shortestLength * 1.2;
-              const isMedium = pathLength <= shortestLength * 1.5;
+        {models.some((m) => m.pathTaken.length >= 2) && (
+          <svg
+            className="absolute inset-0 pointer-events-none z-10"
+            style={{ width: width * cellSize, height: height * cellSize }}
+          >
+            {models.map((model, modelIndex) => {
+              if (model.pathTaken.length < 2) return null;
 
-              let strokeColor = "var(--chart-3)";
-              let strokeWidth = 2;
-              let opacity = 0.5;
-              let dashArray = "4 4";
+              const totalOffset = cellSize * 0.4;
+              const offsetStep =
+                models.length > 1 ? totalOffset / (models.length - 1) : 0;
+              const offsetX =
+                (modelIndex - (models.length - 1) / 2) * offsetStep;
+              const offsetY =
+                (modelIndex - (models.length - 1) / 2) * offsetStep;
 
-              if (isShortest) {
-                strokeColor = "var(--chart-1)";
-                strokeWidth = 3;
-                opacity = 0.9;
-                dashArray = "none";
-              } else if (isShort) {
-                strokeColor = "var(--chart-2)";
-                strokeWidth = 2;
-                opacity = 0.7;
-                dashArray = "3 3";
-              } else if (isMedium) {
-                strokeColor = "var(--chart-3)";
-                strokeWidth = 1.5;
-                opacity = 0.5;
-                dashArray = "2 4";
-              } else {
-                strokeColor = "var(--chart-4)";
-                strokeWidth = 1;
-                opacity = 0.3;
-                dashArray = "1 5";
-              }
+              const strokeWidth = Math.max(
+                1,
+                (cellSize * 0.8) / Math.max(models.length, 1),
+              );
 
               return (
-                <path
-                  key={`path-${pathIndex}`}
-                  d={generatePathD(path, cellSize)}
-                  stroke={strokeColor}
-                  strokeWidth={strokeWidth}
-                  fill="none"
-                  strokeDasharray={dashArray}
-                  opacity={opacity}
-                />
+                <g
+                  key={`path-${model.config.id}`}
+                  transform={`translate(${offsetX}, ${offsetY})`}
+                >
+                  <path
+                    d={generatePathD(model.pathTaken, cellSize)}
+                    stroke={model.config.color}
+                    strokeWidth={strokeWidth}
+                    fill="none"
+                    opacity="0.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </g>
               );
             })}
           </svg>
         )}
 
         {models.map((model, modelIndex) => {
-          if (model.pathTaken.length < 2) return null;
+          const trailEnd =
+            model.pathTaken.length > 0
+              ? model.pathTaken[model.pathTaken.length - 1]
+              : model.position;
 
-          const totalOffset = cellSize * 0.4;
+          const totalOffset = cellSize * 0.3;
           const offsetStep =
             models.length > 1 ? totalOffset / (models.length - 1) : 0;
           const offsetX = (modelIndex - (models.length - 1) / 2) * offsetStep;
           const offsetY = (modelIndex - (models.length - 1) / 2) * offsetStep;
 
-          const strokeWidth = Math.max(
-            1,
-            (cellSize * 0.8) / Math.max(models.length, 1),
-          );
-
           return (
-            <svg
-              key={`path-${model.config.id}`}
-              className="absolute inset-0 pointer-events-none z-10"
-              style={{ width: width * cellSize, height: height * cellSize }}
+            <motion.div
+              key={model.config.id}
+              className="absolute rounded-full shadow-lg pointer-events-none z-20"
+              style={{
+                width: cellSize * 0.5,
+                height: cellSize * 0.5,
+                backgroundColor: model.config.color,
+                boxShadow: `0 0 ${cellSize * 0.3}px ${model.config.color}`,
+              }}
+              animate={{
+                left: trailEnd.x * cellSize + cellSize * 0.25 + offsetX,
+                top: trailEnd.y * cellSize + cellSize * 0.25 + offsetY,
+              }}
+              transition={{
+                type: "spring",
+                stiffness: 300,
+                damping: 30,
+              }}
             >
-              <g transform={`translate(${offsetX}, ${offsetY})`}>
-                <path
-                  d={generatePathD(model.pathTaken, cellSize)}
-                  stroke={model.config.color}
-                  strokeWidth={strokeWidth}
-                  fill="none"
-                  opacity="0.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </g>
-            </svg>
+              <div
+                className="absolute inset-0 rounded-full opacity-60"
+                style={{
+                  backgroundColor: model.config.color,
+                }}
+              />
+              {model.status === "finished" && (
+                <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white">
+                  ✓
+                </div>
+              )}
+              {model.status === "stuck" && (
+                <div className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-white">
+                  !
+                </div>
+              )}
+            </motion.div>
           );
         })}
-
-        {models.map((model) => (
-          <motion.div
-            key={model.config.id}
-            className="absolute rounded-full shadow-lg pointer-events-none z-20"
-            style={{
-              width: cellSize * 0.7,
-              height: cellSize * 0.7,
-              backgroundColor: model.config.color,
-              boxShadow: `0 0 ${cellSize * 0.5}px ${model.config.color}`,
-            }}
-            animate={{
-              left: model.position.x * cellSize + cellSize * 0.15,
-              top: model.position.y * cellSize + cellSize * 0.15,
-            }}
-            transition={{
-              type: "spring",
-              stiffness: 300,
-              damping: 30,
-            }}
-          >
-            <div
-              className="absolute inset-0 rounded-full opacity-60"
-              style={{
-                backgroundColor: model.config.color,
-              }}
-            />
-            {model.status === "finished" && (
-              <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">
-                ✓
-              </div>
-            )}
-            {model.status === "stuck" && (
-              <div className="absolute inset-0 flex items-center justify-center text-xs font-bold text-white">
-                !
-              </div>
-            )}
-          </motion.div>
-        ))}
       </div>
+      {debugMode && allPaths.length > 0 && (
+        <div className="text-xs text-muted-foreground font-mono bg-muted/50 px-3 py-1.5 rounded-md border border-border/50">
+          <span className="font-semibold text-foreground">Unique Paths: </span>
+          {allPaths.length}
+          <span className="text-muted-foreground/70">
+            {" "}
+            (significantly different routes)
+          </span>
+          <span className="mx-2">|</span>
+          <span className="font-semibold text-foreground">Shortest: </span>
+          {allPaths[0]?.length} steps
+          <span className="mx-2">|</span>
+          <span className="font-semibold text-foreground">Longest: </span>
+          {allPaths[allPaths.length - 1]?.length} steps
+        </div>
+      )}
     </div>
   );
 }
@@ -294,3 +298,5 @@ function generatePathD(positions: Position[], cellSize: number): string {
 
   return commands.join(" ");
 }
+
+export const MazeGridComponent = memo(MazeGridComponentInner);

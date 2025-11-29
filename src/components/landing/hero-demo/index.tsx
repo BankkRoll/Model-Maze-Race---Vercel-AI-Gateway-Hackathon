@@ -54,19 +54,35 @@ function HeroDemoComponent({ className, debugMode = false }: HeroDemoProps) {
     const mazeKey = `${startPos?.x},${startPos?.y}-${exitPos?.x},${exitPos?.y}`;
 
     if (prevMazeRef.current !== null && prevMazeRef.current !== mazeKey) {
-      // Maze changed - simulation hook will handle updating models
     }
 
     prevMazeRef.current = mazeKey;
   }, [demoMaze, startPos, exitPos]);
 
+  const resetTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleReset = useCallback(() => {
+    if (resetTimeoutRef.current) {
+      clearTimeout(resetTimeoutRef.current);
+      resetTimeoutRef.current = null;
+    }
     setIsPlaying(false);
     resetRace();
-    setTimeout(() => {
+    resetTimeoutRef.current = setTimeout(() => {
       setIsPlaying(true);
+      resetTimeoutRef.current = null;
     }, 100);
   }, [resetRace]);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+        resetTimeoutRef.current = null;
+      }
+      setIsPlaying(false);
+    };
+  }, []);
 
   const handleRegenerate = useCallback(() => {
     regenerateMaze();
