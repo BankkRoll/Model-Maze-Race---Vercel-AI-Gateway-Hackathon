@@ -1,6 +1,6 @@
 # Model Maze Race
 
-<img width="1997" height="1251" alt="image" src="https://github.com/user-attachments/assets/dbba0f40-6b02-4962-a49d-36b894e71cee" />
+<img width="1672" height="1909" alt="image" src="https://github.com/user-attachments/assets/9264f7fb-b56d-45ab-950e-fddccadb84d1" />
 
 > A competitive AI model evaluation game where multiple AI models race to escape procedurally generated mazes using limited visibility.
 
